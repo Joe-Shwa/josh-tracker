@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Josh's Wellness Tracker</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --blue: #1E5F8E; --blue-light: #2E7FBE; --blue-pale: #E8F2FA;
+  --dark: #0F2A3A; --text: #2C2C2C; --muted: #777; --bg: #F5F9FC;
+  --white: #fff; --border: #C8DCF0; --amber: #F59E0B; --amber-pale: #FFFBEB;
+  --red: #EF4444; --red-pale: #FEF2F2; --green: #10B981; --green-pale: #ECFDF5;
+  --shadow: 0 2px 12px rgba(30,95,142,0.10);
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+
+.overlay { position: fixed; inset: 0; background: rgba(15,42,58,0.88); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
+.overlay-card { background: var(--white); border-radius: 20px; padding: 24px; width: 100%; max-width: 420px; }
+.overlay-card h2 { font-size: 22px; color: var(--dark); margin-bottom: 6px; }
+.overlay-card p { font-size: 14px; color: var(--muted); margin-bottom: 16px; line-height: 1.6; }
+
+.header { background: linear-gradient(135deg, var(--dark) 0%, var(--blue) 100%); color: white; padding: 16px 20px 14px; position: sticky; top: 0; z-index: 100; }
+.header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+.header h1 { font-size: 19px; font-weight: 700; }
+.header .date { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+.header-stats { display: flex; gap: 8px; margin-top: 6px; }
+.h-stat { background: rgba(255,255,255,0.15); border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 600; }
+
+.nav { display: flex; background: var(--white); border-bottom: 2px solid var(--border); overflow-x: auto; scrollbar-width: none; position: sticky; top: 80px; z-index: 99; }
+.nav::-webkit-scrollbar { display: none; }
+.nav-tab { flex: 1; min-width: 60px; padding: 10px 6px 8px; text-align: center; font-size: 10px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.4px; }
+.nav-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.nav-tab .ti { font-size: 18px; display: block; margin-bottom: 1px; }
+
+.section { display: none; padding: 14px; }
+.section.active { display: block; }
+
+.card { background: var(--white); border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); }
+.card-title { font-size: 12px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+
+.macro-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+.macro-item { text-align: center; }
+.ring-wrap { position: relative; width: 60px; height: 60px; margin: 0 auto 4px; }
+.ring-wrap svg { transform: rotate(-90deg); }
+.ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; }
+.ring-val { font-size: 12px; font-weight: 800; color: var(--dark); }
+.ring-unit { font-size: 9px; color: var(--muted); }
+.macro-name { font-size: 10px; font-weight: 600; color: var(--muted); }
+.macro-goal { font-size: 10px; color: var(--muted); }
+
+.input-field { width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; transition: border-color 0.2s; background: var(--white); font-family: inherit; }
+.input-field:focus { border-color: var(--blue); }
+.input-label { font-size: 11px; color: var(--muted); margin-bottom: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+.input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.form-group { margin-bottom: 12px; }
+
+.btn { padding: 11px 18px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+.btn-primary { background: var(--blue); color: white; width: 100%; justify-content: center; }
+.btn-primary:hover { background: var(--blue-light); }
+.btn-secondary { background: var(--blue-pale); color: var(--blue); border: 1.5px solid var(--blue); width: 100%; justify-content: center; }
+.btn-sm { padding: 8px 14px; font-size: 13px; width: auto; }
+
+.progress-bar-wrap { margin-bottom: 10px; }
+.progress-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.progress-label span:first-child { font-weight: 600; }
+.progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.fill-water { background: linear-gradient(90deg, #06B6D4, #67E8F9); }
+.fill-protein { background: linear-gradient(90deg, var(--blue), var(--blue-light)); }
+.water-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.water-btn { background: var(--blue-pale); border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--blue); font-family: inherit; }
+
+.meal-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+.meal-item:last-child { border-bottom: none; }
+.meal-emoji { width: 44px; height: 44px; border-radius: 8px; background: var(--blue-pale); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.meal-info { flex: 1; }
+.meal-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.meal-macros { font-size: 11px; color: var(--muted); }
+.meal-del { color: var(--red); font-size: 20px; cursor: pointer; padding: 4px; line-height: 1; }
+
+.qa-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
+.qa-btn { background: var(--blue-pale); border: 1px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; cursor: pointer; font-size: 11px; }
+.qa-btn:active { background: var(--border); }
+.qa-icon { font-size: 20px; display: block; margin-bottom: 3px; }
+.qa-name { font-weight: 700; display: block; color: var(--dark); }
+.qa-p { color: var(--blue); font-weight: 600; }
+
+.photo-area { border: 2px dashed var(--border); border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; background: var(--blue-pale); margin-bottom: 12px; }
+.photo-area .pa-icon { font-size: 32px; margin-bottom: 6px; }
+.photo-area p { font-size: 14px; color: var(--blue); font-weight: 600; }
+.photo-area small { font-size: 12px; color: var(--muted); }
+
+.weight-display { text-align: center; padding: 12px 0; }
+.weight-big { font-size: 48px; font-weight: 800; color: var(--dark); line-height: 1; }
+.weight-unit { font-size: 18px; color: var(--muted); }
+.weight-diff { font-size: 13px; margin-top: 4px; }
+.stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 12px; }
+.stat-card { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 10px; text-align: center; box-shadow: var(--shadow); }
+.stat-val { font-size: 20px; font-weight: 800; color: var(--blue); }
+.stat-lbl { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; margin-top: 2px; }
+
+.sleep-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
+.sm { background: var(--blue-pale); border-radius: 10px; padding: 10px 6px; text-align: center; }
+.sm-val { font-size: 20px; font-weight: 800; color: var(--dark); }
+.sm-lbl { font-size: 10px; color: var(--blue); font-weight: 600; text-transform: uppercase; }
+.sm-tgt { font-size: 10px; color: var(--muted); }
+.sm.good { background: var(--green-pale); } .sm.good .sm-val { color: var(--green); }
+.sm.warn { background: var(--amber-pale); } .sm.warn .sm-val { color: var(--amber); }
+.sm.bad { background: var(--red-pale); } .sm.bad .sm-val { color: var(--red); }
+
+.pill-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.pill-row:last-child { border-bottom: none; }
+.pill-name { font-weight: 600; font-size: 13px; }
+.pill-dose { font-size: 11px; color: var(--muted); }
+.pill-check { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s; flex-shrink: 0; }
+.pill-check.done { background: var(--blue); border-color: var(--blue); color: white; }
+
+.reta-card { background: linear-gradient(135deg, var(--dark), var(--blue)); border-radius: 12px; padding: 14px; color: white; margin-bottom: 12px; }
+.reta-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8; margin-bottom: 8px; }
+.reta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.reta-label { font-size: 13px; opacity: 0.85; }
+.reta-value { font-size: 15px; font-weight: 700; }
+.reta-next { font-size: 12px; opacity: 0.7; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 8px; }
+
+.chat-wrap { background: var(--white); border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); display: flex; flex-direction: column; height: calc(100vh - 220px); min-height: 320px; overflow: hidden; }
+.chat-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 85%; }
+.msg-user { align-self: flex-end; }
+.msg-ai { align-self: flex-start; }
+.msg-bubble { padding: 10px 13px; border-radius: 16px; font-size: 13px; line-height: 1.55; }
+.msg-user .msg-bubble { background: var(--blue); color: white; border-bottom-right-radius: 4px; }
+.msg-ai .msg-bubble { background: var(--blue-pale); color: var(--text); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
+.msg-time { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.msg-ai .msg-time { text-align: left; }
+.msg-user .msg-time { text-align: right; }
+.chat-input-area { border-top: 1px solid var(--border); padding: 10px; display: flex; gap: 8px; align-items: flex-end; }
+.chat-input { flex: 1; border: 1.5px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 14px; outline: none; resize: none; max-height: 100px; min-height: 38px; font-family: inherit; }
+.chat-input:focus { border-color: var(--blue); }
+.chat-send { background: var(--blue); color: white; border: none; border-radius: 10px; padding: 9px 13px; font-size: 18px; cursor: pointer; flex-shrink: 0; }
+.chat-send:disabled { opacity: 0.5; }
+.chat-cam { background: var(--blue-pale); border: 1.5px solid var(--border); border-radius: 10px; padding: 9px; font-size: 18px; cursor: pointer; flex-shrink: 0; }
+
+.info-box { border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+.info-box.blue { background: var(--blue-pale); border-left: 3px solid var(--blue); }
+.info-box.amber { background: var(--amber-pale); border-left: 3px solid var(--amber); }
+.info-box.green { background: var(--green-pale); border-left: 3px solid var(--green); }
+
+.dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); margin: 0 2px; animation: bonce 1.2s infinite; }
+.dots span:nth-child(2) { animation-delay: .2s; }
+.dots span:nth-child(3) { animation-delay: .4s; }
+@keyframes bonce { 0%,80%,100%{transform:translateY(0);opacity:.4} 40%{transform:translateY(-6px);opacity:1} }
+
+.tag { display: inline-block; background: var(--blue-pale); color: var(--blue); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; margin: 2px; }
+.hidden { display: none !important; }
+.history-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.history-row:last-child { border-bottom: none; }
+.suggestion-box { background: var(--blue-pale); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13px; margin: 12px 0; line-height: 1.7; display: none; }
+</style>
+</head>
+<body>
+
+<!-- SETUP OVERLAY -->
+<div class="overlay" id="setup-overlay">
+  <div class="overlay-card">
+    <h2>👋 G'day Josh</h2>
+    <p>Your tracker is pre-loaded with your targets from the spreadsheet. Just confirm a couple of things and you're in.</p>
+    <div class="info-box blue" style="margin-bottom:16px">
+      <strong>Pre-loaded targets:</strong> 2,392 cal · 184g protein · 80g fat · 234g carbs · 3,100ml water<br>
+      <strong>Current weight:</strong> 103.8kg (10/08/2026) · <strong>Baseline:</strong> 106kg · <strong>Goal:</strong> 90–95kg
+    </div>
+    <div class="form-group">
+      <div class="input-label">Confirm your current weight (kg)</div>
+      <input class="input-field" id="s-cur" type="number" step="0.1" placeholder="103.8" value="103.8">
+    </div>
+    <div class="form-group">
+      <div class="input-label">Goal weight (kg) — midpoint used for targets</div>
+      <input class="input-field" id="s-goal" type="number" step="0.1" placeholder="92" value="92">
+    </div>
+    <div class="suggestion-box" id="s-suggestion"></div>
+    <button class="btn btn-secondary btn-sm" style="margin-bottom:10px;width:auto" onclick="calcTargets()">Recalculate targets →</button>
+    <button class="btn btn-primary" onclick="finishSetup()">Start tracking ✓</button>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="header hidden" id="main-header">
+  <div class="header-top">
+    <div>
+      <h1>Josh's Tracker</h1>
+      <div class="date" id="h-date"></div>
+    </div>
+    <div style="font-size:12px;opacity:0.8" id="h-reta">Reta Week 1</div>
+  </div>
+  <div class="header-stats">
+    <div class="h-stat" id="hs-weight">-- kg</div>
+    <div class="h-stat" id="hs-protein">0 / 184g protein</div>
+    <div class="h-stat" id="hs-supps">0/5 supps</div>
+  </div>
+</div>
+
+<!-- NAV -->
+<div class="nav hidden" id="main-nav">
+  <div class="nav-tab active" onclick="showTab('today',this)"><span class="ti">📊</span>Today</div>
+  <div class="nav-tab" onclick="showTab('log',this)"><span class="ti">🍽️</span>Log</div>
+  <div class="nav-tab" onclick="showTab('weight',this)"><span class="ti">⚖️</span>Weight</div>
+  <div class="nav-tab" onclick="showTab('sleep',this)"><span class="ti">😴</span>Sleep</div>
+  <div class="nav-tab" onclick="showTab('reta',this)"><span class="ti">💉</span>Reta</div>
+  <div class="nav-tab" onclick="showTab('supps',this)"><span class="ti">💊</span>Supps</div>
+  <div class="nav-tab" onclick="showTab('ask',this)"><span class="ti">💬</span>Ask</div>
+</div>
+
+<!-- TODAY -->
+<div class="section hidden active" id="tab-today">
+  <div class="card">
+    <div class="card-title">Today's Nutrition</div>
+    <div class="macro-grid">
+      <div class="macro-item">
+        <div class="ring-wrap"><svg width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="24" fill="none" stroke="#E8F2FA" stroke-width="6"/><circle cx="30" cy="30" r="24" fill="none" stroke="#1E5F8E" stroke-width="6" stroke-dasharray="150.8" id="r-cal" stroke-dashoffset="150.8" stroke-linecap="round"/></svg><div class="ring-label"><div class="ring-val" id="v-cal">0</div><div class="ring-unit">cal</div></div></div>
+        <div class="macro-name">Calories</div><div class="macro-goal" id="g-cal">/ 2392</div>
+      </div>
+      <div class="macro-item">
+        <div class="ring-wrap"><svg width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="24" fill="none" stroke="#E8F2FA" stroke-width="6"/><circle cx="30" cy="30" r="24" fill="none" stroke="#10B981" stroke-width="6" stroke-dasharray="150.8" id="r-pro" stroke-dashoffset="150.8" stroke-linecap="round"/></svg><div class="ring-label"><div class="ring-val" id="v-pro">0</div><div class="ring-unit">g</div></div></div>
+        <div class="macro-name">Protein ⭐</div><div class="macro-goal" id="g-pro">/ 184g</div>
+      </div>
+      <div class="macro-item">
+        <div class="ring-wrap"><svg width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="24" fill="none" stroke="#E8F2FA" stroke-width="6"/><circle cx="30" cy="30" r="24" fill="none" stroke="#F59E0B" stroke-width="6" stroke-dasharray="150.8" id="r-fat" stroke-dashoffset="150.8" stroke-linecap="round"/></svg><div class="ring-label"><div class="ring-val" id="v-fat">0</div><div class="ring-unit">g</div></div></div>
+        <div class="macro-name">Fat</div><div class="macro-goal" id="g-fat">/ 80g</div>
+      </div>
+      <div class="macro-item">
+        <div class="ring-wrap"><svg width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="24" fill="none" stroke="#E8F2FA" stroke-width="6"/><circle cx="30" cy="30" r="24" fill="none" stroke="#3B82F6" stroke-width="6" stroke-dasharray="150.8" id="r-carb" stroke-dashoffset="150.8" stroke-linecap="round"/></svg><div class="ring-label"><div class="ring-val" id="v-carb">0</div><div class="ring-unit">g</div></div></div>
+        <div class="macro-name">Carbs</div><div class="macro-goal" id="g-carb">/ 234g</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Water 💧</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-label"><span id="w-label">0 ml</span><span id="w-goal">Goal: 3100ml (3500ml on site)</span></div>
+      <div class="progress-bar"><div class="progress-fill fill-water" id="w-bar" style="width:0%"></div></div>
+    </div>
+    <div class="water-btns">
+      <button class="water-btn" onclick="addWater(250)">+250ml</button>
+      <button class="water-btn" onclick="addWater(600)">+600ml 🍶</button>
+      <button class="water-btn" onclick="addWater(750)">+750ml</button>
+      <button class="water-btn" onclick="addWater(1000)">+1L</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Today's Meals</div>
+    <div id="meals-list"><div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No meals logged yet.<br><small>Go to Log to add your first one.</small></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Protein Check 💪</div>
+    <div id="protein-msg" style="font-size:13px;color:var(--muted);line-height:1.6">Log your first meal to see your protein progress.</div>
+  </div>
+</div>
+
+<!-- LOG -->
+<div class="section hidden" id="tab-log">
+  <div class="card">
+    <div class="card-title">📸 Photo Log</div>
+    <div class="photo-area" onclick="document.getElementById('ph-in').click()">
+      <div class="pa-icon">📷</div>
+      <p>Take a photo of your meal</p>
+      <small>Claude estimates the macros for you</small>
+    </div>
+    <input type="file" id="ph-in" accept="image/*" capture="environment" class="hidden" onchange="handleMealPhoto(event)">
+    <div id="ph-preview" class="hidden">
+      <img id="ph-img" style="width:100%;border-radius:10px;max-height:200px;object-fit:cover;margin-bottom:10px">
+      <div id="ph-loading" class="hidden" style="text-align:center;padding:16px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing your meal...</div></div>
+      <div id="ph-result"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✏️ Manual Entry</div>
+    <div class="form-group"><div class="input-label">What did you eat?</div><input class="input-field" id="m-food" placeholder="e.g. Steak 180g + 3 boiled eggs"></div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Cal</div><input class="input-field" id="m-cal" type="number" placeholder="0"></div>
+      <div style="flex:1"><div class="input-label">Protein</div><input class="input-field" id="m-pro" type="number" placeholder="0g"></div>
+      <div style="flex:1"><div class="input-label">Fat</div><input class="input-field" id="m-fat" type="number" placeholder="0g"></div>
+      <div style="flex:1"><div class="input-label">Carbs</div><input class="input-field" id="m-carb" type="number" placeholder="0g"></div>
+    </div>
+    <button class="btn btn-primary" onclick="addManual()">Add to today</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">⚡ Quick Add — Site Mess Staples</div>
+    <div class="qa-grid" id="qa-grid"></div>
+  </div>
+</div>
+
+<!-- WEIGHT -->
+<div class="section hidden" id="tab-weight">
+  <div class="card">
+    <div class="card-title">Log Today's Weight</div>
+    <div class="weight-display">
+      <span class="weight-big" id="w-cur">103.8</span><span class="weight-unit"> kg</span>
+      <div class="weight-diff" id="w-diff"></div>
+    </div>
+    <div class="input-row" style="margin-top:10px">
+      <input class="input-field" id="w-input" type="number" step="0.1" placeholder="e.g. 103.2">
+      <button class="btn btn-primary btn-sm" onclick="logWeight()" style="flex:0 0 auto;width:auto">Log</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">💡 Morning after bathroom, before eating — most consistent</div>
+  </div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-val" id="s-start">106</div><div class="stat-lbl">Baseline</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-cur">103.8</div><div class="stat-lbl">Current</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-goal">92</div><div class="stat-lbl">Goal</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Progress</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-label"><span>To goal</span><span id="prog-txt">-- kg remaining</span></div>
+      <div class="progress-bar"><div class="progress-fill fill-protein" id="w-prog" style="width:0%"></div></div>
+    </div>
+    <div id="w-advice" style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:8px"></div>
+  </div>
+  <div class="card"><div class="card-title">History</div><div id="w-history" style="font-size:13px;color:var(--muted)">No entries yet.</div></div>
+</div>
+
+<!-- SLEEP -->
+<div class="section hidden" id="tab-sleep">
+  <div class="card">
+    <div class="card-title">Log Last Night / Last Day Sleep</div>
+    <div class="info-box blue" style="margin-bottom:10px">On night shift, log your daytime sleep as normal — just note "day sleep" in the notes field. Garmin configured for daytime sleeping from 03/08.</div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Total (hrs)</div><input class="input-field" id="sl-tot" type="number" step="0.25" placeholder="7.5"></div>
+      <div style="flex:1"><div class="input-label">Deep (mins)</div><input class="input-field" id="sl-deep" type="number" placeholder="75"></div>
+      <div style="flex:1"><div class="input-label">REM (mins)</div><input class="input-field" id="sl-rem" type="number" placeholder="90"></div>
+    </div>
+    <div class="form-group"><div class="input-label">Notes</div><input class="input-field" id="sl-notes" placeholder="e.g. Day sleep, noisy camp, felt rested"></div>
+    <button class="btn btn-primary" onclick="logSleep()">Save sleep</button>
+  </div>
+  <div class="card">
+    <div class="card-title">Last Sleep</div>
+    <div class="sleep-row">
+      <div class="sm" id="sm-tot"><div class="sm-val" id="smv-tot">--</div><div class="sm-lbl">Total</div><div class="sm-tgt">Target: ≥7h</div></div>
+      <div class="sm" id="sm-deep"><div class="sm-val" id="smv-deep">--</div><div class="sm-lbl">Deep</div><div class="sm-tgt">Target: ≥75m</div></div>
+      <div class="sm" id="sm-rem"><div class="sm-val" id="smv-rem">--</div><div class="sm-lbl">REM</div><div class="sm-tgt">Target: ≥90m</div></div>
+    </div>
+    <div id="sl-feedback" style="font-size:13px;color:var(--muted);line-height:1.6"></div>
+  </div>
+  <div class="card"><div class="card-title">Sleep History</div><div id="sl-history" style="font-size:13px;color:var(--muted)">No entries yet.</div></div>
+</div>
+
+<!-- RETA TAB -->
+<div class="section hidden" id="tab-reta">
+  <div class="reta-card">
+    <div class="reta-title">Retatrutide Protocol</div>
+    <div class="reta-row"><span class="reta-label">Started</span><span class="reta-value">02/08/2026</span></div>
+    <div class="reta-row"><span class="reta-label">Current week</span><span class="reta-value" id="reta-week">Week --</span></div>
+    <div class="reta-row"><span class="reta-label">Current dose</span><span class="reta-value" id="reta-dose">-- units / --mg</span></div>
+    <div class="reta-row"><span class="reta-label">Next injection</span><span class="reta-value" id="reta-next">Sunday night</span></div>
+    <div class="reta-next" id="reta-days">-- days until next dose</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Titration Schedule</div>
+    <div id="reta-schedule" style="font-size:13px;line-height:1.8"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log This Week's Injection</div>
+    <div class="form-group"><div class="input-label">Date injected</div><input class="input-field" id="reta-date" type="date"></div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Units</div><input class="input-field" id="reta-units" type="number" placeholder="30"></div>
+      <div style="flex:1"><div class="input-label">Dose (mg)</div><input class="input-field" id="reta-mg" type="number" step="0.5" placeholder="1.0"></div>
+    </div>
+    <div class="form-group"><div class="input-label">Notes</div><input class="input-field" id="reta-notes" placeholder="e.g. No nausea, mild head sensation"></div>
+    <button class="btn btn-primary" onclick="logReta()">Log injection</button>
+  </div>
+
+  <div class="card"><div class="card-title">Injection History</div><div id="reta-history" style="font-size:13px;color:var(--muted)">No entries yet.</div></div>
+</div>
+
+<!-- SUPPS -->
+<div class="section hidden" id="tab-supps">
+  <div class="card"><div class="card-title">Today's Supplements</div><div id="supp-list"></div><div style="font-size:11px;color:var(--muted);margin-top:10px">Tap the circle to mark as taken</div></div>
+  <div class="card">
+    <div class="card-title">Stack Notes</div>
+    <div style="font-size:13px;line-height:1.9;color:var(--muted)">
+      <div style="margin-bottom:6px"><strong style="color:var(--dark)">Methylated B Complex</strong> — Morning. Pending homocysteine results.</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--dark)">Magnesium L-Threonate</strong> — Evening. Crosses blood-brain barrier, sleep quality.</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--dark)">Retatrutide</strong> — Sunday nights. Current: Week 1, 30 units (1mg). Vial 1: 3.5mg/ml.</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--dark)">Semax</strong> — On 20-day washout (Gusev protocol). Restart ~day 21 post-cycle.</div>
+      <div><strong style="color:var(--dark)">KLOW</strong> — Currently between vials. Assess restart after Tuesday endo consult results.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ASK -->
+<div class="section hidden" id="tab-ask">
+  <div class="chat-wrap">
+    <div class="chat-msgs" id="chat-msgs">
+      <div class="msg msg-ai"><div class="msg-bubble">Hey Josh 👋 What do you need? Macros, supplement questions, how you're tracking on Reta, or anything else — fire away.</div><div class="msg-time">Now</div></div>
+    </div>
+    <div class="chat-input-area">
+      <button class="chat-cam" onclick="document.getElementById('chat-ph').click()" title="Attach photo">📷</button>
+      <input type="file" id="chat-ph" accept="image/*" capture="environment" class="hidden" onchange="handleChatPhoto(event)">
+      <textarea class="chat-input" id="chat-in" placeholder="Ask anything..." rows="1" onkeydown="chatKey(event)" oninput="autoSize(this)"></textarea>
+      <button class="chat-send" id="chat-btn" onclick="sendChat()">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let S = {
+  profile: null,
+  today: { meals:[], water:0, date: new Date().toDateString() },
+  weights: [
+    {date:'19/07/2026', weight:106},
+    {date:'10/08/2026', weight:103.8}
+  ],
+  sleep: [],
+  supps: { b_complex:false, mag:false, reta:false, semax:false, klow:false },
+  reta: []
+};
+let chatHistory = [];
+
+const RETA_START = new Date('2026-08-02');
+const RETA_SCHEDULE = [
+  {week:1, units:30, mg:1.0, vial:'Vial 1 (3.5mg/ml)'},
+  {week:2, units:40, mg:1.5, vial:'Vial 1 (3.5mg/ml)'},
+  {week:3, units:60, mg:2.0, vial:'Vial 1 (3.5mg/ml)'},
+  {week:4, units:70, mg:2.5, vial:'Vial 1 (3.5mg/ml)'},
+  {week:5, units:40, mg:3.0, vial:'Vial 2 (7.5mg/ml)'},
+  {week:6, units:47, mg:3.5, vial:'Vial 2 (7.5mg/ml)'},
+  {week:7, units:53, mg:4.0, vial:'Vial 2 (7.5mg/ml)'},
+  {week:8, units:60, mg:4.5, vial:'Vial 2 (7.5mg/ml)'},
+  {week:9, units:50, mg:5.0, vial:'Vial 3 (10mg/ml)'},
+  {week:10, units:50, mg:5.0, vial:'Vial 3 (10mg/ml)'},
+  {week:11, units:50, mg:5.0, vial:'Vial 3 (10mg/ml)'},
+  {week:12, units:50, mg:5.0, vial:'Vial 3 (10mg/ml)'},
+];
+
+const QUICK_FOODS = [
+  {n:"Steak 180g",i:"🥩",c:320,p:43,f:16,cb:0},
+  {n:"3 Boiled Eggs",i:"🥚",c:210,p:18,f:15,cb:0},
+  {n:"Chicken Breast",i:"🍗",c:350,p:65,f:8,cb:0,a:"2 pieces"},
+  {n:"Greek Yoghurt",i:"🥛",c:150,p:17,f:5,cb:8,a:"170g"},
+  {n:"Flat White",i:"☕",c:90,p:4,f:3,cb:10,a:"double shot"},
+  {n:"Protein Shake",i:"🥤",c:127,p:23,f:2,cb:3,a:"1 scoop whey"},
+  {n:"Bone Broth",i:"🍵",c:10,p:8,f:0,cb:1},
+  {n:"Tuna Tin",i:"🐟",c:120,p:28,f:1,cb:0,a:"95g tin"},
+  {n:"4 Boiled Eggs",i:"🥚",c:280,p:24,f:20,cb:0},
+];
+
+const SUPPS = [
+  {id:"b_complex", name:"Methylated B Complex", dose:"Morning"},
+  {id:"mag", name:"Magnesium L-Threonate", dose:"Evening"},
+  {id:"reta", name:"Retatrutide", dose:"Weekly — Sunday night"},
+  {id:"semax", name:"Semax", dose:"On washout — do not take"},
+  {id:"klow", name:"KLOW", dose:"Between vials — assess next swing"},
+];
+
+window.onload = () => {
+  loadLocal();
+  updateDate();
+  renderQuickAdd();
+  checkDayReset();
+  updateRetaDisplay();
+  if (S.profile) { showApp(); updateAll(); }
+};
+
+function loadLocal() {
+  try { const d=localStorage.getItem('josh_tracker_v1'); if(d) S={...S,...JSON.parse(d)}; } catch(e){}
+}
+function saveLocal() {
+  try { localStorage.setItem('josh_tracker_v1', JSON.stringify(S)); } catch(e){}
+}
+function checkDayReset() {
+  const t=new Date().toDateString();
+  if(S.today.date!==t) { S.today={meals:[],water:0,date:t}; S.supps={b_complex:false,mag:false,reta:false,semax:false,klow:false}; saveLocal(); }
+}
+function updateDate() {
+  const el=document.getElementById('h-date');
+  if(el) el.textContent=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'});
+}
+
+function showApp() {
+  document.getElementById('setup-overlay').classList.add('hidden');
+  document.getElementById('main-header').classList.remove('hidden');
+  document.getElementById('main-nav').classList.remove('hidden');
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('hidden'));
+}
+
+// SETUP
+function calcTargets() {
+  const goal=parseFloat(document.getElementById('s-goal').value)||92;
+  const cals=Math.round(goal*26);
+  const protein=Math.round(goal*2);
+  const fat=Math.round(cals/30);
+  const carbs=Math.round((cals-protein*4-fat*9)/4);
+  const water=Math.round((goal/30)*1000);
+  const box=document.getElementById('s-suggestion');
+  box.style.display='block';
+  box.innerHTML=`<strong>Recalculated at ${goal}kg goal:</strong><br>🔥 ${cals} cal · 💪 ${protein}g protein · 🥑 ${fat}g fat · 🍝 ${carbs}g carbs · 💧 ${(water/1000).toFixed(1)}L`;
+  S._pending={cals,protein,fat,carbs,water};
+}
+
+function finishSetup() {
+  const cur=parseFloat(document.getElementById('s-cur').value)||103.8;
+  const goal=parseFloat(document.getElementById('s-goal').value)||92;
+  if(!S._pending) { S._pending={cals:2392,protein:184,fat:80,carbs:234,water:3100}; }
+  S.profile={name:'Josh',current:106,goal,height:184,age:47,...S._pending};
+  if(!S.weights.find(w=>w.weight===cur)) S.weights.push({date:new Date().toDateString(),weight:cur});
+  saveLocal(); showApp(); updateAll();
+}
+
+// TABS
+function showTab(name,el) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(el) el.classList.add('active');
+}
+
+// MACROS
+function getTotals() {
+  return S.today.meals.reduce((a,m)=>({cal:a.cal+(m.cal||0),pro:a.pro+(m.pro||0),fat:a.fat+(m.fat||0),carb:a.carb+(m.carb||0)}),{cal:0,pro:0,fat:0,carb:0});
+}
+
+function updateMacros() {
+  if(!S.profile) return;
+  const t=getTotals();
+  const g={cal:S.profile.cals,pro:S.profile.protein,fat:S.profile.fat,carb:S.profile.carbs};
+  const setRing=(id,val,goal)=>{ const pct=Math.min(val/goal*100,100); const el=document.getElementById('r-'+id); if(el) el.style.strokeDashoffset=150.8*(1-pct/100); const ve=document.getElementById('v-'+id); if(ve) ve.textContent=Math.round(val); };
+  setRing('cal',t.cal,g.cal); setRing('pro',t.pro,g.pro); setRing('fat',t.fat,g.fat); setRing('carb',t.carb,g.carb);
+  document.getElementById('g-cal').textContent='/ '+g.cal;
+  document.getElementById('g-pro').textContent='/ '+g.pro+'g';
+  document.getElementById('g-fat').textContent='/ '+g.fat+'g';
+  document.getElementById('g-carb').textContent='/ '+g.carb+'g';
+  const rem=g.pro-t.pro;
+  const pm=document.getElementById('protein-msg');
+  if(rem<=0){pm.style.color='var(--green)';pm.innerHTML='✅ Protein done. Good work — muscle preservation ticked off for today.';}
+  else if(rem<40){pm.style.color='var(--amber)';pm.innerHTML=`⚡ ${Math.round(rem)}g to go. A chicken breast or a protein shake will close it.`;}
+  else{pm.style.color='var(--muted)';pm.innerHTML=`💪 ${Math.round(rem)}g of protein still to hit. Protein first at every meal — especially important on Reta as appetite drops.`;}
+  document.getElementById('hs-protein').textContent=Math.round(t.pro)+' / '+g.pro+'g protein';
+}
+
+function updateWater() {
+  if(!S.profile) return;
+  const goal=S.profile.water;
+  const pct=Math.min(S.today.water/goal*100,100);
+  document.getElementById('w-bar').style.width=pct+'%';
+  document.getElementById('w-label').textContent=S.today.water+' ml';
+}
+function addWater(ml){ S.today.water=Math.min(S.today.water+ml,5000); saveLocal(); updateWater(); }
+
+function updateMealsList(){
+  const el=document.getElementById('meals-list');
+  if(!S.today.meals.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No meals logged yet.<br><small>Go to Log to add your first one.</small></div>';return;}
+  el.innerHTML=S.today.meals.map((m,i)=>`<div class="meal-item"><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs</div></div><div class="meal-del" onclick="delMeal(${i})">×</div></div>`).join('');
+}
+function delMeal(i){S.today.meals.splice(i,1);saveLocal();updateAll();}
+function addMeal(m){S.today.meals.push({...m,time:new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})});saveLocal();updateAll();}
+function addManual(){const name=document.getElementById('m-food').value;if(!name)return;addMeal({name,cal:+document.getElementById('m-cal').value||0,pro:+document.getElementById('m-pro').value||0,fat:+document.getElementById('m-fat').value||0,carb:+document.getElementById('m-carb').value||0,emoji:'✏️'});['m-food','m-cal','m-pro','m-fat','m-carb'].forEach(id=>document.getElementById(id).value='');}
+function renderQuickAdd(){document.getElementById('qa-grid').innerHTML=QUICK_FOODS.map((f,i)=>`<div class="qa-btn" onclick="addQuick(${i})"><span class="qa-icon">${f.i}</span><span class="qa-name">${f.n}</span><span class="qa-p">${f.p}g protein</span></div>`).join('');}
+function addQuick(i){const f=QUICK_FOODS[i];addMeal({name:f.n+(f.a?' ('+f.a+')':''),cal:f.c,pro:f.p,fat:f.f,carb:f.cb,emoji:f.i});}
+
+// PHOTO
+async function handleMealPhoto(event){
+  const file=event.target.files[0];if(!file)return;
+  const preview=document.getElementById('ph-preview'),img=document.getElementById('ph-img'),loading=document.getElementById('ph-loading'),result=document.getElementById('ph-result');
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    img.src=e.target.result;preview.classList.remove('hidden');loading.classList.remove('hidden');result.innerHTML='';
+    try{
+      const b64=e.target.result.split(',')[1];
+      const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:file.type,data:b64}},{type:'text',text:'Analyse this meal for a male FIFO worker, 47yo, 184cm, ~104kg, 184g protein daily target. Return ONLY valid JSON: {"name":"meal name","cal":number,"pro":number,"fat":number,"carb":number,"emoji":"one emoji","notes":"brief tip focused on protein content and whether this is a good choice for his goals"}'}]}]})});
+      const data=await resp.json();
+      const meal=JSON.parse(data.content.filter(c=>c.type==='text').map(c=>c.text).join('').replace(/```json|```/g,'').trim());
+      loading.classList.add('hidden');
+      result.innerHTML=`<div style="padding:10px 0"><div style="font-size:15px;font-weight:700;margin-bottom:6px">${meal.emoji} ${meal.name}</div><div style="margin-bottom:8px"><span class="tag">🔥 ${meal.cal} cal</span><span class="tag" style="background:#ECFDF5;color:#10B981">💪 ${meal.pro}g protein</span><span class="tag" style="background:#FFFBEB;color:#F59E0B">🥑 ${meal.fat}g fat</span><span class="tag" style="background:#EFF6FF;color:#3B82F6">🍝 ${meal.carb}g carbs</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">${meal.notes}</div><button class="btn btn-primary" onclick='logPhotoMeal(${JSON.stringify(meal)})'>Add to today</button></div>`;
+    }catch(e){loading.classList.add('hidden');result.innerHTML='<div style="color:var(--red);font-size:13px">Could not analyse photo. Try manual entry.</div>';}
+  };
+  reader.readAsDataURL(file);event.target.value='';
+}
+function logPhotoMeal(m){addMeal(m);document.getElementById('ph-preview').classList.add('hidden');showTab('today',document.querySelectorAll('.nav-tab')[0]);document.querySelectorAll('.nav-tab').forEach((t,i)=>t.classList.toggle('active',i===0));}
+
+// WEIGHT
+function logWeight(){const w=parseFloat(document.getElementById('w-input').value);if(!w)return;S.weights.push({date:new Date().toDateString(),weight:w});if(S.weights.length>90)S.weights=S.weights.slice(-90);saveLocal();updateWeight();document.getElementById('w-input').value='';}
+function updateWeight(){
+  if(!S.weights.length)return;
+  const latest=S.weights[S.weights.length-1].weight;
+  const start=S.profile?.current||106;const goal=S.profile?.goal||92;
+  document.getElementById('w-cur').textContent=latest.toFixed(1);
+  document.getElementById('s-start').textContent=start+'kg';
+  document.getElementById('s-cur').textContent=latest+'kg';
+  document.getElementById('s-goal').textContent=goal+'kg';
+  document.getElementById('hs-weight').textContent=latest+'kg';
+  const diff=latest-start;
+  const de=document.getElementById('w-diff');
+  de.textContent=diff<0?diff.toFixed(1)+'kg since baseline 💪':diff>0?'+'+diff.toFixed(1)+'kg since baseline':'Same as baseline';
+  de.style.color=diff<0?'var(--green)':diff>0?'var(--red)':'var(--muted)';
+  const lost=start-latest;const total=start-goal;
+  document.getElementById('w-prog').style.width=Math.max(0,Math.min(lost/total*100,100))+'%';
+  const rem=latest-goal;
+  document.getElementById('prog-txt').textContent=rem>0?rem.toFixed(1)+' kg to goal':'🎉 Goal reached!';
+  const weeks=Math.round(rem/0.4);
+  document.getElementById('w-advice').innerHTML=rem>0?`At 0.4kg/week sustainable rate, roughly <strong>${weeks} weeks</strong> to reach ${goal}kg. Reta should accelerate that meaningfully as dose titrates up.`:`🏆 Goal weight reached.`;
+  const hist=document.getElementById('w-history');
+  hist.innerHTML=[...S.weights].reverse().slice(0,10).map(e=>`<div class="history-row"><span>${e.date}</span><span style="font-weight:700">${e.weight} kg</span></div>`).join('')||'No entries yet.';
+}
+
+// SLEEP
+function logSleep(){const tot=parseFloat(document.getElementById('sl-tot').value);if(!tot)return;const entry={date:new Date().toDateString(),total:tot,deep:+document.getElementById('sl-deep').value||0,rem:+document.getElementById('sl-rem').value||0,notes:document.getElementById('sl-notes').value};S.sleep.unshift(entry);if(S.sleep.length>30)S.sleep=S.sleep.slice(0,30);saveLocal();renderSleep(entry);['sl-tot','sl-deep','sl-rem','sl-notes'].forEach(id=>document.getElementById(id).value='');}
+function renderSleep(e){
+  const setSM=(id,val,target,unit)=>{document.getElementById('smv-'+id).textContent=val+(unit||'');const cls=val>=target?'good':val>=target*.85?'warn':'bad';document.getElementById('sm-'+id).className='sm '+cls;};
+  setSM('tot',e.total,7,'h');setSM('deep',e.deep,75,'m');setSM('rem',e.rem,90,'m');
+  const fb=document.getElementById('sl-feedback');
+  const good=e.total>=7&&e.deep>=75&&e.rem>=90;
+  fb.textContent=good?'✅ Good sleep. Deep and REM on target — glymphatic clearance happening, dementia prevention ticked.':e.total<6?'⚠️ Short sleep. Glymphatic clearance is impaired below 6 hours. Prioritise the next sleep opportunity.':'💛 Decent but not optimal. Consistent timing is the biggest lever — even on FIFO.';
+  const hist=document.getElementById('sl-history');
+  hist.innerHTML=S.sleep.slice(0,7).map(sl=>`<div class="history-row"><span style="color:var(--muted)">${sl.date}${sl.notes?' · '+sl.notes:''}</span><span>${sl.total}h · ${sl.deep}m deep · ${sl.rem}m REM</span></div>`).join('')||'No entries yet.';
+}
+
+// RETA
+function updateRetaDisplay(){
+  const now=new Date();
+  const msPerWeek=7*24*60*60*1000;
+  const weekNum=Math.floor((now-RETA_START)/msPerWeek)+1;
+  const clampedWeek=Math.min(Math.max(weekNum,1),12);
+  const schedule=RETA_SCHEDULE[clampedWeek-1];
+  document.getElementById('reta-week').textContent='Week '+clampedWeek+' of 12';
+  document.getElementById('reta-dose').textContent=schedule.units+' units / '+schedule.mg+'mg — '+schedule.vial;
+  const nextSunday=new Date(now);
+  const day=now.getDay();
+  const daysUntilSun=day===0?7:7-day;
+  nextSunday.setDate(now.getDate()+daysUntilSun);
+  document.getElementById('reta-next').textContent='Sunday '+nextSunday.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+  document.getElementById('reta-days').textContent=daysUntilSun===7?'Tonight is injection night 💉':daysUntilSun+' days until next injection';
+  document.getElementById('h-reta').textContent='Reta Wk '+clampedWeek;
+  const sched=document.getElementById('reta-schedule');
+  sched.innerHTML=RETA_SCHEDULE.map(w=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);${w.week===clampedWeek?'font-weight:700;color:var(--blue)':''}"><span>Week ${w.week}</span><span>${w.units} units · ${w.mg}mg</span><span style="font-size:11px;color:var(--muted)">${w.vial}</span></div>`).join('');
+}
+
+function logReta(){
+  const date=document.getElementById('reta-date').value;
+  const units=document.getElementById('reta-units').value;
+  const mg=document.getElementById('reta-mg').value;
+  const notes=document.getElementById('reta-notes').value;
+  if(!date||!units)return;
+  S.reta.push({date,units:+units,mg:+mg,notes});
+  saveLocal();
+  document.getElementById('reta-history').innerHTML=[...S.reta].reverse().map(r=>`<div class="history-row"><span>${r.date}</span><span style="font-weight:700">${r.units} units / ${r.mg}mg${r.notes?' · '+r.notes:''}</span></div>`).join('');
+  ['reta-date','reta-units','reta-mg','reta-notes'].forEach(id=>document.getElementById(id).value='');
+}
+
+// SUPPS
+function renderSupps(){
+  document.getElementById('supp-list').innerHTML=SUPPS.map(s=>`<div class="pill-row"><div><div class="pill-name">${s.name}</div><div class="pill-dose">${s.dose}</div></div><div class="pill-check ${S.supps[s.id]?'done':''}" onclick="toggleSupp('${s.id}')">${S.supps[s.id]?'✓':''}</div></div>`).join('');
+  const done=Object.values(S.supps).filter(Boolean).length;
+  document.getElementById('hs-supps').textContent=done+'/'+SUPPS.length+' supps';
+}
+function toggleSupp(id){S.supps[id]=!S.supps[id];saveLocal();renderSupps();}
+
+// CHAT
+function autoSize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,100)+'px';}
+function chatKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}
+function buildSys(){
+  const p=S.profile;const t=getTotals();
+  const weekNum=Math.min(Math.floor((new Date()-RETA_START)/(7*24*60*60*1000))+1,12);
+  return `You are Josh's personal health assistant. Josh: 47yo male, FIFO worker (tunnelling/heavy infrastructure, 2 weeks on / 1 week off rotating days and nights), 184cm, current weight ~${S.weights.length?S.weights[S.weights.length-1].weight:103.8}kg, baseline 106kg, goal 90-95kg.
+
+Active stack: Retatrutide (week ${weekNum} of 12 cycle, started 02/08/2026, Sunday night weekly injection), Methylated B Complex (morning), Magnesium L-Threonate (evening). Semax on 20-day washout (Gusev protocol). KLOW between vials.
+
+Health context: Low free testosterone (231-239 pmol/L, below range), elevated FSH (22-23 IU/L, 3x upper limit), elevated oestradiol (161 pmol/L, above range). Referred to endocrinologist at Wollongong Private Hospital. Brachial plexus injury left arm (limits grip/deadlift). Multiple lumbar disc issues. High dementia risk both parental lines — cognitive protection is active priority.
+
+Today's intake: ${t.cal} cal, ${t.pro}g protein (goal ${p?p.protein:184}g), ${t.fat}g fat, ${t.carb}g carbs. Water: ${S.today.water}ml.
+
+Be direct, practical, plain English. No jargon without explanation. Josh understands mechanisms but prefers straight talk. Protein target (${p?p.protein:184}g) is priority #1 on Reta — flag it when relevant.`;
+}
+async function sendChat(imgB64,imgType){
+  const input=document.getElementById('chat-in');const text=input.value.trim();
+  if(!text&&!imgB64)return;
+  const content=[];if(imgB64)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});if(text)content.push({type:'text',text});
+  appendMsg('user',text||(imgB64?'📷 [Photo]':''));input.value='';input.style.height='auto';
+  document.getElementById('chat-btn').disabled=true;const loading=appendLoading();
+  chatHistory.push({role:'user',content:content.length===1&&content[0].type==='text'?text:content});
+  try{
+    const msgs=[{role:'user',content:'System: '+buildSys()},{role:'assistant',content:'Understood. Ready to help.'}, ...chatHistory];
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:msgs})});
+    const data=await resp.json();const reply=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+    loading.remove();appendMsg('ai',reply);chatHistory.push({role:'assistant',content:reply});
+    if(chatHistory.length>20)chatHistory=chatHistory.slice(-20);
+  }catch(e){loading.remove();appendMsg('ai',"Can't connect right now. Try again in a moment.");}
+  document.getElementById('chat-btn').disabled=false;
+}
+async function handleChatPhoto(event){const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=async e=>{await sendChat(e.target.result.split(',')[1],file.type);};reader.readAsDataURL(file);event.target.value='';}
+function appendMsg(role,text){const msgs=document.getElementById('chat-msgs');const now=new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});const d=document.createElement('div');d.className='msg msg-'+(role==='user'?'user':'ai');d.innerHTML=`<div class="msg-bubble">${text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div><div class="msg-time">${now}</div>`;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+function appendLoading(){const msgs=document.getElementById('chat-msgs');const d=document.createElement('div');d.className='msg msg-ai';d.innerHTML='<div class="msg-bubble"><div class="dots"><span></span><span></span><span></span></div></div>';msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+
+function updateAll(){updateMacros();updateWater();updateMealsList();updateWeight();renderSupps();updateRetaDisplay();if(S.sleep.length)renderSleep(S.sleep[0]);}
+</script>
+</body>
+</html>
