@@ -278,12 +278,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <div class="card">
     <div class="card-title">📸 Photo Log</div>
     <div class="info-box blue" style="margin-top:-4px">Best for single items or simple plates in good light. Complex multi-item plates — use text lookup instead.</div>
-    <div class="photo-area" onclick="document.getElementById('ph-in').click()">
-      <div class="pa-icon">📷</div>
-      <p>Take a photo of your meal</p>
-      <small>Claude estimates the macros</small>
+
+    <input type="file" id="ph-camera" accept="image/*" capture="environment" class="hidden" onchange="handleMealPhoto(event)">
+    <input type="file" id="ph-gallery" accept="image/*" class="hidden" onchange="handleMealPhoto(event)">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-primary" style="flex:1" onclick="document.getElementById('ph-camera').click()">📷 Take Photo</button>
+      <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('ph-gallery').click()">🖼️ From Gallery</button>
     </div>
-    <input type="file" id="ph-in" accept="image/*"  class="hidden" onchange="handleMealPhoto(event)">
     <div id="ph-preview" class="hidden">
       <img id="ph-img" style="width:100%;border-radius:10px;max-height:180px;object-fit:cover;margin-bottom:10px">
       <div id="ph-loading" class="hidden" style="text-align:center;padding:14px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing...</div></div>
