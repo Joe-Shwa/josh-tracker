@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Josh's Tracker</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -202,7 +203,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="header hidden" id="main-header">
   <div class="header-top">
     <div><h1>Josh's Tracker</h1><div class="date" id="h-date"></div></div>
+    <div style="display:flex;gap:6px;align-items:center">
     <div style="font-size:11px;opacity:0.8" id="h-reta">Reta Wk 2</div>
+    <div id="sync-indicator" style="font-size:11px;background:rgba(255,255,255,0.15);border-radius:8px;padding:3px 8px;cursor:pointer" onclick="handleSyncClick()">☁️ Connect Drive</div>
+  </div>
   </div>
   <div class="header-stats">
     <div class="h-stat" id="hs-weight">-- kg</div>
@@ -744,6 +748,132 @@ function appendMsg(role,text){const msgs=document.getElementById('chat-msgs'),no
 function appendLoading(){const msgs=document.getElementById('chat-msgs'),d=document.createElement('div');d.className='msg msg-ai';d.innerHTML='<div class="msg-bubble"><div class="dots"><span></span><span></span><span></span></div></div>';msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
 
 function updateAll(){updateMacros();updateWater();updateMealsList();updateWeight();renderSupps();updateRetaDisplay();if(S.sleep.length)renderSleep(S.sleep[0]);}
+
+// ─── GOOGLE DRIVE SYNC ────────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = '93450585738-k7hsn3fjsu69sigcktdfftfcsjk91qcu.apps.googleusercontent.com';
+const DRIVE_FILE_NAME = 'josh-tracker-data.json';
+let driveAccessToken = null;
+let driveFileId = null;
+
+function initGoogleAuth(){
+  if(typeof google === 'undefined') return;
+  google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file',
+    callback: async (response) => {
+      if(response.error) { console.error('Auth error:', response.error); return; }
+      driveAccessToken = response.access_token;
+      localStorage.setItem('josh_drive_token', driveAccessToken);
+      updateSyncUI('syncing');
+      await findOrCreateDriveFile();
+      await loadFromDrive();
+      updateSyncUI('synced');
+    }
+  }).requestAccessToken();
+}
+
+function handleSyncClick(){
+  if(driveAccessToken){ syncToDrive(); }
+  else { initGoogleAuth(); }
+}
+
+async function findOrCreateDriveFile(){
+  // Search for existing file in appDataFolder
+  const searchResp = await fetch(
+    'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%22'+DRIVE_FILE_NAME+'%22&fields=files(id,name)',
+    {headers:{'Authorization':'Bearer '+driveAccessToken}}
+  );
+  const searchData = await searchResp.json();
+  if(searchData.files && searchData.files.length > 0){
+    driveFileId = searchData.files[0].id;
+  } else {
+    // Create new file
+    const createResp = await fetch('https://www.googleapis.com/drive/v3/files',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+driveAccessToken,'Content-Type':'application/json'},
+      body:JSON.stringify({name:DRIVE_FILE_NAME,parents:['appDataFolder']})
+    });
+    const createData = await createResp.json();
+    driveFileId = createData.id;
+  }
+}
+
+async function loadFromDrive(){
+  if(!driveAccessToken || !driveFileId) return;
+  try{
+    const resp = await fetch(
+      'https://www.googleapis.com/drive/v3/files/'+driveFileId+'?alt=media',
+      {headers:{'Authorization':'Bearer '+driveAccessToken}}
+    );
+    if(resp.ok){
+      const text = await resp.text();
+      if(text && text.length > 2){
+        const driveData = JSON.parse(text);
+        // Merge drive data — drive wins for history, local wins for today
+        if(driveData.weights && driveData.weights.length > S.weights.length) S.weights = driveData.weights;
+        if(driveData.sleep && driveData.sleep.length > S.sleep.length) S.sleep = driveData.sleep;
+        if(driveData.reta && driveData.reta.length > S.reta.length) S.reta = driveData.reta;
+        if(driveData.profile) S.profile = driveData.profile;
+        saveLocal();
+        updateAll();
+      }
+    }
+  }catch(e){ console.error('Load from Drive error:', e); }
+}
+
+async function syncToDrive(){
+  if(!driveAccessToken || !driveFileId){ initGoogleAuth(); return; }
+  updateSyncUI('syncing');
+  try{
+    const data = JSON.stringify({
+      profile: S.profile,
+      weights: S.weights,
+      sleep: S.sleep,
+      reta: S.reta,
+      lastSync: new Date().toISOString()
+    });
+    await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files/'+driveFileId+'?uploadType=media',
+      {method:'PATCH', headers:{'Authorization':'Bearer '+driveAccessToken,'Content-Type':'application/json'}, body:data}
+    );
+    updateSyncUI('synced');
+  }catch(e){
+    console.error('Drive sync error:', e);
+    updateSyncUI('error');
+  }
+}
+
+function updateSyncUI(state){
+  const el = document.getElementById('sync-indicator');
+  if(!el) return;
+  if(state==='synced'){ el.textContent='✅ Drive synced'; el.style.background='rgba(16,185,129,0.3)'; }
+  else if(state==='syncing'){ el.textContent='⏳ Syncing...'; el.style.background='rgba(245,158,11,0.3)'; }
+  else if(state==='error'){ el.textContent='❌ Sync error'; el.style.background='rgba(239,68,68,0.3)'; }
+  else { el.textContent='☁️ Connect Drive'; el.style.background='rgba(255,255,255,0.15)'; }
+}
+
+// Auto sync after data changes
+const _origSaveLocal = saveLocal;
+function saveLocal(){
+  _origSaveLocal();
+  if(driveAccessToken && driveFileId) syncToDrive();
+}
+
+// Try to restore token on load
+window.addEventListener('load', ()=>{
+  const savedToken = localStorage.getItem('josh_drive_token');
+  if(savedToken){
+    driveAccessToken = savedToken;
+    findOrCreateDriveFile().then(()=>{
+      loadFromDrive();
+      updateSyncUI('synced');
+    }).catch(()=>{
+      driveAccessToken = null;
+      localStorage.removeItem('josh_drive_token');
+      updateSyncUI('disconnected');
+    });
+  }
+});
 </script>
 </body>
 </html>
