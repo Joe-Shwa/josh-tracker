@@ -507,7 +507,10 @@ window.onload = () => {
   updateRetaDisplay();
 };
 function loadLocal(){try{const d=localStorage.getItem('josh_v2');if(d)S={...S,...JSON.parse(d)};}catch(e){}}
-function saveLocal(){try{localStorage.setItem('josh_v2',JSON.stringify(S));}catch(e){}}
+function saveLocal(){
+  try{localStorage.setItem('josh_v2',JSON.stringify(S));}catch(e){}
+  if(driveAccessToken && driveFileId){ syncToDrive(); }
+}
 function checkDayReset(){const t=new Date().toDateString();if(S.today.date!==t){S.today={meals:[],water:0,date:t};S.supps={b_complex:false,mag:false,fish_oil:false,reta:false,semax:false,klow:false};saveLocal();}}
 function updateDate(){const el=document.getElementById('h-date');if(el)el.textContent=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'});}
 function showApp(){document.getElementById('setup-overlay').classList.add('hidden');document.getElementById('main-header').classList.remove('hidden');document.getElementById('main-nav').classList.remove('hidden');document.querySelectorAll('.section').forEach(s=>s.classList.remove('hidden'));}
@@ -852,12 +855,7 @@ function updateSyncUI(state){
   else { el.textContent='☁️ Connect Drive'; el.style.background='rgba(255,255,255,0.15)'; }
 }
 
-// Auto sync after data changes
-const _origSaveLocal = saveLocal;
-function saveLocal(){
-  _origSaveLocal();
-  if(driveAccessToken && driveFileId) syncToDrive();
-}
+// Drive sync triggered directly from saveLocal
 
 // Try to restore token on load
 window.addEventListener('load', ()=>{
