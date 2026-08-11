@@ -565,7 +565,7 @@ async function doLookup(){
   const result=document.getElementById('lookup-result');
   btn.disabled=true;loading.classList.remove('hidden');result.style.display='none';
   try{
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -614,7 +614,7 @@ async function handleMealPhoto(event){
     img.src=e.target.result;preview.classList.remove('hidden');loading.classList.remove('hidden');result.innerHTML='';
     try{
       const b64=e.target.result.split(',')[1];
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -729,7 +729,7 @@ async function sendChat(imgB64,imgType){
   chatHistory.push({role:'user',content:content.length===1&&content[0].type==='text'?text:content});
   try{
     const msgs=[{role:'user',content:'System: '+buildSys()},{role:'assistant',content:'Ready to help.'},...chatHistory];
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:msgs})});
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:msgs})});
     const data=await resp.json();
     const reply=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     loading.remove();appendMsg('ai',reply);chatHistory.push({role:'assistant',content:reply});
