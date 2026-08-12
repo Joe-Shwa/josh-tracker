@@ -889,7 +889,7 @@ async function addPeptide(){
   const appetite=document.getElementById('pep-appetite').checked;
   if(!name)return;
   const id=newId('pep');
-  S.peptides.push({id,name,custom:true,updatedAt:Date.now(),purpose:purposeInput,cautions:[],affectsAppetite:appetite,tracking:'checklist',dosing:{type:'fixed',doseLabel:dose||'As directed',frequency:''}});
+  S.peptides.push({id,name,custom:true,updatedAt:Date.now(),purpose:purposeInput,cautions:[],evidence:'',affectsAppetite:appetite,tracking:'checklist',dosing:{type:'fixed',doseLabel:dose||'As directed',frequency:''}});
   S.peptideChecks[id]=false;
   saveLocal();renderPeptides();
   ['pep-name','pep-dose','pep-purpose'].forEach(i=>document.getElementById(i).value='');
@@ -897,16 +897,23 @@ async function addPeptide(){
   if(!purposeInput){
     const info=await fetchPeptideInfo(name,dose);
     const idx=S.peptides.findIndex(x=>x.id===id);
-    if(idx>-1){S.peptides[idx].purpose=info.purpose||S.peptides[idx].purpose;S.peptides[idx].cautions=info.cautions||[];S.peptides[idx].updatedAt=Date.now();saveLocal();renderPeptides();}
+    if(idx>-1){S.peptides[idx].purpose=info.purpose||S.peptides[idx].purpose;S.peptides[idx].cautions=info.cautions||[];S.peptides[idx].evidence=info.evidence||'';S.peptides[idx].updatedAt=Date.now();saveLocal();renderPeptides();}
   }
 }
 async function fetchPeptideInfo(name,dose){
   try{
-    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,messages:[{role:'user',content:`Give a brief practical profile for the peptide/compound "${name}" (dose/timing as described: "${dose}"). Return ONLY valid JSON, no other text: {"purpose":"one sentence — what it's used for","cautions":["short caution 1","short caution 2"]}. Keep cautions to at most 2, only genuinely relevant ones (timing, interactions, common side effects) — return an empty array if nothing notable.`}]})});
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:350,messages:[{role:'user',content:`Give a brief practical profile for the peptide/compound "${name}" (dose/timing as described: "${dose}"). Return ONLY valid JSON, no other text:
+{"purpose":"one sentence — what it's used for","cautions":["short caution 1","short caution 2"],"evidence":"one short clause, or empty string"}
+
+Rules:
+- "cautions": at most 2, only genuinely relevant ones (timing, interactions, common side effects). Empty array if nothing notable.
+- "evidence": only fill this in if there's a meaningful gap between how long/widely a compound has been used in humans and how well that use is independently verified by modern Western trial standards (this applies to a lot of Russian-bioregulator-era peptides, but isn't specific to any one of them — apply the same logic to any compound where it's true). When it applies, ALWAYS state it as two short clauses, not one vague phrase: "Long clinical/use history in [region/context]; limited independent Western trial data" — never collapse this into something like "limited human data" alone, since that reads as barely-tested-in-humans and misrepresents a compound with decades of real-world use but thin independent verification. If the compound's evidence is well-established by modern standards, or if there's genuinely little human use of any kind (so there's no history/verification gap to describe), leave "evidence" as an empty string.`}]})});
     const data=await resp.json();
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
-    return JSON.parse(text.replace(/```json\n?|```/g,'').trim());
-  }catch(e){return {purpose:'',cautions:[]};}
+    const info=JSON.parse(text.replace(/```json\n?|```/g,'').trim());
+    if(!info.evidence)info.evidence='';
+    return info;
+  }catch(e){return {purpose:'',cautions:[],evidence:''};}
 }
 function renderPeptides(){
   const el=document.getElementById('peptide-list');if(!el)return;
@@ -924,6 +931,7 @@ function renderPeptides(){
     if(!expanded)return html;
     let body=`<div class="pep-body" onclick="event.stopPropagation()">`;
     (p.cautions||[]).forEach(c=>{body+=`<div class="pep-caution">⚠️ ${c}</div>`;});
+    if(p.evidence){body+=`<div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">📋 ${p.evidence}</div>`;}
     if(p.dosing.type==='titration'){
       body+=`<div class="card-title" style="margin-top:2px">Titration schedule</div><div style="margin-bottom:12px">`+
         p.dosing.schedule.map(w=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;${w.week===wk?'font-weight:700;color:var(--blue);background:var(--blue-pale);margin:0 -4px;padding:6px 4px;border-radius:6px':''}"><span>Wk ${w.week}</span><span>${w.units}u / ${w.mg}mg</span><span style="color:var(--muted)">${w.vial||''}</span></div>`).join('')+
