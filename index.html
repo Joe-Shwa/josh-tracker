@@ -147,6 +147,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .pep-body { background: var(--white); border: 1px solid var(--border); border-top: none; border-radius: 0 0 12px 12px; padding: 14px; margin: -12px 0 12px; box-shadow: var(--shadow); }
 .pep-caution { background: var(--amber-pale); border-left: 3px solid var(--amber); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.6; margin-bottom: 10px; color: var(--dark); }
 .pep-remove { font-size: 12px; color: var(--red); cursor: pointer; text-align:right; margin-top:8px; }
+.pep-edit { font-size: 12px; color: var(--blue); cursor: pointer; text-align:left; margin-top:8px; }
 
 .chat-wrap { background: var(--white); border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); display: flex; flex-direction: column; height: calc(100vh - 230px); min-height: 320px; overflow: hidden; }
 .chat-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -474,7 +475,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div class="form-group"><div class="input-label">Dose / timing (as you'd say it)</div><input class="input-field" id="pep-dose" placeholder="e.g. 250mcg subcutaneous daily"></div>
     <div class="form-group"><div class="input-label">Purpose &amp; cautions — leave blank to auto-fill</div><input class="input-field" id="pep-purpose" placeholder="Optional — I'll look it up if left blank"></div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:10px"><input type="checkbox" id="pep-appetite"> Suppresses appetite (affects protein-goal messaging)</label>
-    <button class="btn btn-primary btn-sm" style="width:auto" onclick="addPeptide()">Add ✓</button>
+    <button class="btn btn-primary btn-sm" id="pep-save-btn" style="width:auto" onclick="addPeptide()">Add ✓</button>
+    <button class="btn btn-secondary btn-sm hidden" id="pep-cancel-btn" style="width:auto;margin-left:8px" onclick="cancelPeptideEdit()">Cancel edit</button>
   </div>
 </div>
 
@@ -1188,11 +1190,32 @@ function logPeptideDose(id){
 }
 function delPeptideLog(id){S.peptideLogs=S.peptideLogs.filter(l=>l.id!==id);markDeleted('pep_log',id);saveLocal();renderPeptides();}
 function removePeptide(id){
+  if(peptideEditId===id)cancelPeptideEdit();
   S.peptides=S.peptides.filter(p=>p.id!==id);
   S.peptideLogs=S.peptideLogs.filter(l=>l.peptideId!==id);
   delete S.peptideChecks[id];
   markDeleted('peptide',id);
   saveLocal();renderPeptides();
+}
+let peptideEditId=null;
+function editPeptide(id){
+  const p=S.peptides.find(x=>x.id===id);
+  if(!p||p.dosing.type!=='fixed'){alert('Only peptides added through this form can be edited here — titration schedules need to be removed and re-added.');return;}
+  peptideEditId=id;
+  document.getElementById('pep-name').value=p.name;
+  document.getElementById('pep-dose').value=p.dosing.doseLabel==='As directed'?'':p.dosing.doseLabel;
+  document.getElementById('pep-purpose').value=p.purpose||'';
+  document.getElementById('pep-appetite').checked=!!p.affectsAppetite;
+  document.getElementById('pep-save-btn').textContent='Update ✓';
+  document.getElementById('pep-cancel-btn').classList.remove('hidden');
+  document.getElementById('pep-name').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function cancelPeptideEdit(){
+  peptideEditId=null;
+  document.getElementById('pep-save-btn').textContent='Add ✓';
+  document.getElementById('pep-cancel-btn').classList.add('hidden');
+  ['pep-name','pep-dose','pep-purpose'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('pep-appetite').checked=false;
 }
 async function addPeptide(){
   const name=document.getElementById('pep-name').value.trim();
@@ -1200,6 +1223,21 @@ async function addPeptide(){
   const purposeInput=document.getElementById('pep-purpose').value.trim();
   const appetite=document.getElementById('pep-appetite').checked;
   if(!name)return;
+
+  if(peptideEditId){
+    const idx=S.peptides.findIndex(x=>x.id===peptideEditId);
+    if(idx===-1){cancelPeptideEdit();return;}
+    const id=peptideEditId;
+    S.peptides[idx]={...S.peptides[idx],name,affectsAppetite:appetite,updatedAt:Date.now(),dosing:{...S.peptides[idx].dosing,doseLabel:dose||'As directed'}};
+    if(purposeInput)S.peptides[idx].purpose=purposeInput;
+    saveLocal();renderPeptides();
+    cancelPeptideEdit();
+    if(!purposeInput && !S.peptides[idx].purpose){
+      await runPeptideLookup(id,name,dose);
+    }
+    return;
+  }
+
   const id=newId('pep');
   S.peptides.push({id,name,custom:true,updatedAt:Date.now(),purpose:purposeInput,cautions:[],evidence:'',affectsAppetite:appetite,tracking:'checklist',dosing:{type:'fixed',doseLabel:dose||'As directed',frequency:''}});
   S.peptideChecks[id]=false;
@@ -1207,10 +1245,33 @@ async function addPeptide(){
   ['pep-name','pep-dose','pep-purpose'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('pep-appetite').checked=false;
   if(!purposeInput){
-    const info=await fetchPeptideInfo(name,dose);
-    const idx=S.peptides.findIndex(x=>x.id===id);
-    if(idx>-1){S.peptides[idx].purpose=info.purpose||S.peptides[idx].purpose;S.peptides[idx].cautions=info.cautions||[];S.peptides[idx].evidence=info.evidence||'';S.peptides[idx].updatedAt=Date.now();saveLocal();renderPeptides();}
+    await runPeptideLookup(id,name,dose);
   }
+}
+// Wraps the lookup + write-back, and — unlike before — actually surfaces it when the lookup fails
+// instead of leaving the entry silently blank with no explanation.
+async function runPeptideLookup(id,name,dose){
+  const idx=S.peptides.findIndex(x=>x.id===id);
+  if(idx===-1)return;
+  const info=await fetchPeptideInfo(name,dose);
+  const stillIdx=S.peptides.findIndex(x=>x.id===id);
+  if(stillIdx===-1)return;
+  if(info.__failed){
+    S.peptides[stillIdx].lookupFailed=true;
+    saveLocal();renderPeptides();
+    return;
+  }
+  S.peptides[stillIdx].purpose=info.purpose||S.peptides[stillIdx].purpose;
+  S.peptides[stillIdx].cautions=info.cautions||[];
+  S.peptides[stillIdx].evidence=info.evidence||'';
+  S.peptides[stillIdx].lookupFailed=false;
+  S.peptides[stillIdx].updatedAt=Date.now();
+  saveLocal();renderPeptides();
+}
+function retryPeptideLookup(id){
+  const p=S.peptides.find(x=>x.id===id);
+  if(!p)return;
+  runPeptideLookup(id,p.name,p.dosing.doseLabel==='As directed'?'':p.dosing.doseLabel);
 }
 async function fetchPeptideInfo(name,dose){
   try{
@@ -1220,12 +1281,17 @@ async function fetchPeptideInfo(name,dose){
 Rules:
 - "cautions": at most 2, only genuinely relevant ones (timing, interactions, common side effects). Empty array if nothing notable.
 - "evidence": only fill this in if there's a meaningful gap between how long/widely a compound has been used in humans and how well that use is independently verified by modern Western trial standards (this applies to a lot of Russian-bioregulator-era peptides, but isn't specific to any one of them — apply the same logic to any compound where it's true). When it applies, ALWAYS state it as two short clauses, not one vague phrase: "Long clinical/use history in [region/context]; limited independent Western trial data" — never collapse this into something like "limited human data" alone, since that reads as barely-tested-in-humans and misrepresents a compound with decades of real-world use but thin independent verification. If the compound's evidence is well-established by modern standards, or if there's genuinely little human use of any kind (so there's no history/verification gap to describe), leave "evidence" as an empty string.`}]})});
+    if(!resp.ok){console.error('Peptide lookup HTTP error:',resp.status,await resp.text().catch(()=>''));return {__failed:true};}
     const data=await resp.json();
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
-    const info=JSON.parse(text.replace(/```json\n?|```/g,'').trim());
+    // Models sometimes add a stray preamble despite instructions — pull out the JSON object rather than requiring the whole reply to be clean JSON
+    const jsonMatch=text.match(/\{[\s\S]*\}/);
+    if(!jsonMatch){console.error('Peptide lookup: no JSON found in reply:',text);return {__failed:true};}
+    const info=JSON.parse(jsonMatch[0]);
     if(!info.evidence)info.evidence='';
+    if(!info.cautions)info.cautions=[];
     return info;
-  }catch(e){return {purpose:'',cautions:[],evidence:''};}
+  }catch(e){console.error('Peptide lookup error:',e);return {__failed:true};}
 }
 function renderPeptides(){
   const el=document.getElementById('peptide-list');if(!el)return;
@@ -1242,6 +1308,12 @@ function renderPeptides(){
     </div>`;
     if(!expanded)return html;
     let body=`<div class="pep-body" onclick="event.stopPropagation()">`;
+    if(p.lookupFailed && !p.purpose){
+      body+=`<div class="pep-caution" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span>⚠️ Auto-lookup didn't come back — tap to retry, or edit it in manually.</span>
+        <span class="meal-del" style="font-size:16px;flex-shrink:0" onclick="retryPeptideLookup('${p.id}')" title="Retry lookup">🔄</span>
+      </div>`;
+    }
     (p.cautions||[]).forEach(c=>{body+=`<div class="pep-caution">⚠️ ${c}</div>`;});
     if(p.evidence){body+=`<div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">📋 ${p.evidence}</div>`;}
     if(p.dosing.type==='titration'){
@@ -1263,7 +1335,10 @@ function renderPeptides(){
         <div class="pill-check ${S.peptideChecks[p.id]?'done':''}" onclick="togglePeptideCheck('${p.id}')">${S.peptideChecks[p.id]?'✓':''}</div>
       </div>`;
     }
-    body+=`<div class="pep-remove" onclick="removePeptide('${p.id}')">Remove peptide ✕</div></div>`;
+    body+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">`;
+    body+=p.dosing.type==='fixed'?`<span class="pep-edit" onclick="editPeptide('${p.id}')">Edit ✎</span>`:'<span></span>';
+    body+=`<span class="pep-remove" style="margin:0" onclick="removePeptide('${p.id}')">Remove ✕</span>`;
+    body+=`</div></div>`;
     return html+body;
   }).join('');
   const titr=(S.peptides||[]).find(p=>p.dosing.type==='titration');
