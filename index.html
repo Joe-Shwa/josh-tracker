@@ -1577,22 +1577,66 @@ const DRIVE_FILE_NAME = 'josh-tracker-data.json';
 let driveAccessToken = null;
 let driveFileId = null;
 
+const DRIVE_TOKEN_KEY='josh_drive_token', DRIVE_LINKED_KEY='josh_drive_ever_linked', DRIVE_DISMISS_KEY='josh_drive_banner_dismissed';
+
 function initGoogleAuth(){
   if(typeof google === 'undefined') return;
   google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file',
     callback: async (response) => {
-      if(response.error) { console.error('Auth error:', response.error); return; }
+      if(response.error) { console.error('Auth error:', response.error); updateSyncUI('error'); return; }
       driveAccessToken = response.access_token;
-      localStorage.setItem('josh_drive_token', driveAccessToken);
+      localStorage.setItem(DRIVE_TOKEN_KEY, driveAccessToken);
+      localStorage.setItem(DRIVE_LINKED_KEY, '1');
+      hideDriveBanner();
       updateSyncUI('syncing');
-      await findOrCreateDriveFile();
-      await loadFromDrive();
-      updateSyncUI('synced');
+      try{
+        await findOrCreateDriveFile();
+        await loadFromDrive();
+        updateSyncUI('synced');
+      }catch(e){
+        console.error('Reconnect failed:', e);
+        updateSyncUI('error');
+      }
     }
   }).requestAccessToken();
 }
+
+// Called whenever the Drive API tells us the token is dead (401/403), or a request fails outright.
+// Clears the dead token but keeps the "ever linked" flag so the banner can fire on next load.
+function handleDriveAuthFailure(){
+  driveAccessToken = null;
+  localStorage.removeItem(DRIVE_TOKEN_KEY);
+  updateSyncUI('disconnected');
+  checkDriveBannerOnLoad();
+}
+
+// ─── DISCONNECT BANNER ─────────────────────────────────────────────────────
+// Only fires if a Drive account was linked at some point AND isn't connected right now —
+// silent, unnoticed disconnects are exactly what caused the lost week of data.
+function checkDriveBannerOnLoad(){
+  if(sessionStorage.getItem(DRIVE_DISMISS_KEY)==='1') return;
+  if(localStorage.getItem(DRIVE_LINKED_KEY)==='1' && !driveAccessToken){
+    showDriveBanner();
+  }
+}
+function ensureDriveBanner(){
+  let b=document.getElementById('drive-banner');
+  if(b) return b;
+  b=document.createElement('div');
+  b.id='drive-banner';
+  b.style.cssText='display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:10px 14px;font-size:13px;font-weight:600;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,0.35)';
+  b.innerHTML='<span>⚠️ Drive disconnected — your entries aren\'t backing up.</span>'+
+    '<button onclick="reconnectDriveFromBanner()" style="background:#fff;color:#dc2626;border:none;padding:5px 12px;border-radius:6px;font-weight:700;cursor:pointer">Reconnect</button>'+
+    '<button onclick="dismissDriveBanner()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.6);padding:5px 10px;border-radius:6px;cursor:pointer">Dismiss</button>';
+  document.body.prepend(b);
+  return b;
+}
+function showDriveBanner(){ ensureDriveBanner().style.display='flex'; }
+function hideDriveBanner(){ const b=document.getElementById('drive-banner'); if(b) b.style.display='none'; }
+function dismissDriveBanner(){ hideDriveBanner(); sessionStorage.setItem(DRIVE_DISMISS_KEY,'1'); }
+function reconnectDriveFromBanner(){ hideDriveBanner(); initGoogleAuth(); }
 
 function handleSyncClick(){
   if(driveAccessToken){ fullSync(); }
@@ -1610,12 +1654,19 @@ async function fullSync(){
 async function findOrCreateDriveFile(){
   // Search for existing file in appDataFolder
   const searchResp = await fetch(
-    'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%22'+DRIVE_FILE_NAME+'%22&fields=files(id,name)',
+    'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%22'+DRIVE_FILE_NAME+'%22&fields=files(id,name,modifiedTime)',
     {headers:{'Authorization':'Bearer '+driveAccessToken}}
   );
+  // A dead/expired token must fail loudly here — otherwise this silently falls through to the
+  // "create new file" branch below and spawns a blank Drive file, orphaning the real history.
+  if(searchResp.status===401 || searchResp.status===403) throw new Error('drive-auth-failed');
   const searchData = await searchResp.json();
   if(searchData.files && searchData.files.length > 0){
-    driveFileId = searchData.files[0].id;
+    // If duplicate files exist (a leftover from the old bug), prefer the one modified most recently
+    // rather than always taking files[0], which Drive doesn't guarantee is the "real" one.
+    driveFileId = searchData.files.length>1
+      ? searchData.files.slice().sort((a,b)=>new Date(b.modifiedTime||0)-new Date(a.modifiedTime||0))[0].id
+      : searchData.files[0].id;
   } else {
     // Create new file
     const createResp = await fetch('https://www.googleapis.com/drive/v3/files',{
@@ -1623,6 +1674,7 @@ async function findOrCreateDriveFile(){
       headers:{'Authorization':'Bearer '+driveAccessToken,'Content-Type':'application/json'},
       body:JSON.stringify({name:DRIVE_FILE_NAME,parents:['appDataFolder']})
     });
+    if(createResp.status===401 || createResp.status===403) throw new Error('drive-auth-failed');
     const createData = await createResp.json();
     driveFileId = createData.id;
   }
@@ -1635,6 +1687,7 @@ async function loadFromDrive(){
       'https://www.googleapis.com/drive/v3/files/'+driveFileId+'?alt=media',
       {headers:{'Authorization':'Bearer '+driveAccessToken}}
     );
+    if(resp.status===401 || resp.status===403){ handleDriveAuthFailure(); return; }
     if(resp.ok){
       const text = await resp.text();
       if(text && text.length > 2){
@@ -1701,10 +1754,12 @@ async function syncToDrive(){
       tombstones: S.tombstones,
       lastSync: new Date().toISOString()
     });
-    await fetch(
+    const resp = await fetch(
       'https://www.googleapis.com/upload/drive/v3/files/'+driveFileId+'?uploadType=media',
       {method:'PATCH', headers:{'Authorization':'Bearer '+driveAccessToken,'Content-Type':'application/json'}, body:data}
     );
+    if(resp.status===401 || resp.status===403){ handleDriveAuthFailure(); return; }
+    if(!resp.ok){ updateSyncUI('error'); return; }
     updateSyncUI('synced');
   }catch(e){
     console.error('Drive sync error:', e);
@@ -1725,17 +1780,18 @@ function updateSyncUI(state){
 
 // Try to restore token on load
 window.addEventListener('load', ()=>{
-  const savedToken = localStorage.getItem('josh_drive_token');
+  const savedToken = localStorage.getItem(DRIVE_TOKEN_KEY);
   if(savedToken){
     driveAccessToken = savedToken;
     findOrCreateDriveFile().then(()=>{
       loadFromDrive();
       updateSyncUI('synced');
     }).catch(()=>{
-      driveAccessToken = null;
-      localStorage.removeItem('josh_drive_token');
-      updateSyncUI('disconnected');
+      handleDriveAuthFailure();
     });
+  } else {
+    // No token this session — if a Drive account was linked before, flag it prominently
+    checkDriveBannerOnLoad();
   }
 });
 
