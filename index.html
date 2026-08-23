@@ -391,6 +391,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="lr-note" id="lr-note"></div>
       <button class="btn btn-primary btn-sm" style="width:auto" onclick="addFromLookup()">Add to today ✓</button>
       <button class="btn btn-secondary btn-sm" style="width:auto;margin-left:8px" onclick="editLookup()">Edit first</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto;margin-left:8px" onclick="saveAsQuickFood(lookupPending)">⭐ Quick Add</button>
     </div>
   </div>
 
@@ -398,8 +399,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <div class="card">
     <div class="card-title">✏️ Manual Entry</div>
     <div class="form-group">
-      <div class="input-label">Food name</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <div class="input-label" style="margin-bottom:0">Food name</div>
+        <div style="display:flex;gap:6px">
+          <span class="chat-cam" style="padding:5px 9px;font-size:15px" onclick="document.getElementById('m-photo-camera').click()" title="Take photo to auto-fill macros">📷</span>
+          <span class="chat-cam" style="padding:5px 9px;font-size:15px" onclick="document.getElementById('m-photo-gallery').click()" title="Choose from gallery to auto-fill macros">🖼️</span>
+        </div>
+      </div>
       <input class="input-field" id="m-food" placeholder="e.g. Steak 180g + 3 boiled eggs">
+      <input type="file" id="m-photo-camera" accept="image/*" capture="environment" class="hidden" onchange="handleManualPhoto(event)">
+      <input type="file" id="m-photo-gallery" accept="image/*" class="hidden" onchange="handleManualPhoto(event)">
+      <div id="m-photo-loading" class="hidden" style="text-align:center;padding:8px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--muted);margin-top:4px">Analysing photo...</div></div>
     </div>
     <div class="macro-fields" id="m-macro-fields">
       <div class="macro-field-wrap"><div class="input-label">Cal</div><input class="input-field" id="m-cal" type="number" placeholder="0"></div>
@@ -408,7 +418,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="macro-field-wrap" id="m-carb-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="m-carb" type="number" placeholder="0"></div>
       <div class="macro-field-wrap hidden" id="m-fib-wrap"><div class="input-label">Fiber g</div><input class="input-field" id="m-fib" type="number" placeholder="0"></div>
     </div>
-    <button class="btn btn-primary" id="m-save-btn" onclick="addManual()">Add to today</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" id="m-save-btn" style="flex:1" onclick="addManual()">Add to today</button>
+      <button class="btn btn-secondary" style="flex:1" onclick="saveManualAsQuickFood()">⭐ Save to Quick Add</button>
+    </div>
     <button class="btn btn-secondary btn-sm hidden" id="m-cancel-btn" style="width:auto;margin-top:8px" onclick="cancelMealEdit()">Cancel edit</button>
   </div>
 
@@ -1024,7 +1037,14 @@ function renderQuickAdd(){
   const grid=document.getElementById('qa-grid');
   const items=S.quickFoods||[];
   grid.innerHTML=items.map(quickAddCardHtml).join('')
-    + '<div class="qa-add-btn" onclick="showAddQuickFood()">➕ Add food</div>';
+    + '<div class="qa-add-btn" onclick="scrollToQuickAddSource()">➕ Add food</div>';
+}
+// Jumps to Manual Entry — from there you can type it, snap/choose a photo to auto-fill, or
+// use Look Up Macros above and hit "⭐ Quick Add" on any of the three result cards.
+function scrollToQuickAddSource(){
+  showTab('log',document.getElementById('nav-log'));
+  const el=document.getElementById('m-food');
+  if(el){ el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus(); }
 }
 function showQtyPicker(id){
   const f=(S.quickFoods||[]).find(x=>x.id===id);if(!f)return;
@@ -1034,16 +1054,76 @@ function showQtyPicker(id){
   addMeal({name:n+'x '+f.n,cal:Math.round(f.c*n),pro:Math.round(f.p*n),fat:Math.round(f.f*n),carb:Math.round(f.cb*n),fib:Math.round((f.fib||0)*n),emoji:f.i});
 }
 function addQuick(id){const f=(S.quickFoods||[]).find(x=>x.id===id);if(!f)return;addMeal({name:f.n+(f.a?' ('+f.a+')':''),cal:f.c,pro:f.p,fat:f.f,carb:f.cb,fib:f.fib||0,emoji:f.i});}
-function showAddQuickFood(){
-  const n=prompt('Food name?');if(!n)return;
-  const i=prompt('Emoji for it?','🍽️')||'🍽️';
-  const c=+prompt('Calories?','0')||0;
-  const p=+prompt('Protein (g)?','0')||0;
-  const f=+prompt('Fat (g)?','0')||0;
-  const cb=+prompt('Carbs (g)?','0')||0;
-  const fib=+prompt('Fiber (g)? (optional)','0')||0;
-  S.quickFoods.push({id:newId('qf'),n,i,c,p,f,cb,fib,custom:true});
+// Generic quick-add saver — takes the same {name,cal,pro,fat,carb,fib,emoji} shape produced by
+// Photo Log, Look Up Macros and Manual Entry, so all three input methods can feed it identically.
+function saveAsQuickFood(meal){
+  if(!meal || !meal.name || !String(meal.name).trim()){ alert('Add a food name first (in Manual Entry, or run a photo/lookup above).'); return; }
+  const name=String(meal.name).trim();
+  const dup=(S.quickFoods||[]).some(f=>f.n.toLowerCase()===name.toLowerCase());
+  if(dup && !confirm('"'+name+'" is already in Quick Add. Add it again as a duplicate?'))return;
+  S.quickFoods.push({
+    id:newId('qf'), n:name, i:meal.emoji||'🍽️',
+    c:Math.round(+meal.cal||0), p:Math.round(+meal.pro||0), f:Math.round(+meal.fat||0),
+    cb:Math.round(+meal.carb||0), fib:Math.round(+meal.fib||0),
+    custom:true
+  });
   saveLocal();renderQuickAdd();
+  alert('⭐ Added "'+name+'" to Quick Add.');
+}
+// Reads whatever's currently typed in Manual Entry (however it got there — typed by hand or
+// auto-filled from a photo) and saves it as a Quick Add item, without also logging it to today.
+function saveManualAsQuickFood(){
+  saveAsQuickFood({
+    name:document.getElementById('m-food').value,
+    cal:document.getElementById('m-cal').value,
+    pro:document.getElementById('m-pro').value,
+    fat:document.getElementById('m-fat').value,
+    carb:document.getElementById('m-carb').value,
+    fib:document.getElementById('m-fib').value,
+    emoji:'🍽️'
+  });
+}
+// Same vision analysis as the Photo Log card, but writes the result into Manual Entry's fields
+// for review/editing instead of immediately logging it — lets Manual Entry be filled by camera
+// or gallery instead of typing every number by hand.
+async function handleManualPhoto(event){
+  const file=event.target.files[0];if(!file)return;
+  const loading=document.getElementById('m-photo-loading');
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    loading.classList.remove('hidden');
+    try{
+      const b64=e.target.result.split(',')[1];
+      const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-6',max_tokens:400,
+          messages:[{role:'user',content:[
+            {type:'image',source:{type:'base64',media_type:file.type,data:b64}},
+            {type:'text',text:'Analyse this meal photo for a 47yo male, 184cm, ~104kg, 184g daily protein target. Cooked weight assumed. Return ONLY valid JSON: {"name":"meal description","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}'}
+          ]}]
+        })
+      });
+      const data=await resp.json();
+      if(data.error){throw new Error(data.error.message);}
+      const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+      const clean=text.replace(/```json\n?|```/g,'').trim();
+      const meal=JSON.parse(clean);
+      document.getElementById('m-food').value=meal.name||'';
+      document.getElementById('m-cal').value=Math.round(+meal.cal||0);
+      document.getElementById('m-pro').value=Math.round(+meal.pro||0);
+      document.getElementById('m-fat').value=Math.round(+meal.fat||0);
+      document.getElementById('m-carb').value=Math.round(+meal.carb||0);
+      document.getElementById('m-fib').value=Math.round(+meal.fib||0);
+      loading.classList.add('hidden');
+      document.getElementById('m-food').scrollIntoView({behavior:'smooth',block:'center'});
+    }catch(e){
+      loading.classList.add('hidden');
+      alert("Couldn't analyse this photo — try Look Up Macros instead, or enter the numbers manually.");
+    }
+  };
+  reader.readAsDataURL(file);event.target.value='';
 }
 function removeQuickFood(id){
   S.quickFoods=(S.quickFoods||[]).filter(f=>f.id!==id);
@@ -1128,7 +1208,7 @@ async function handleMealPhoto(event){
       const meal=JSON.parse(clean);
       meal.cal=+meal.cal||0;meal.pro=+meal.pro||0;meal.fat=+meal.fat||0;meal.carb=+meal.carb||0;meal.fib=+meal.fib||0;
       loading.classList.add('hidden');
-      result.innerHTML=`<div style="padding:8px 0"><div style="font-size:14px;font-weight:700;margin-bottom:6px">${meal.emoji} ${meal.name}</div><div style="margin-bottom:6px"><span class="tag">🔥 ${meal.cal} cal</span><span class="tag" style="background:#ECFDF5;color:#10B981">💪 ${meal.pro}g protein</span><span class="tag" style="background:#FFFBEB;color:#F59E0B">🥑 ${meal.fat}g fat</span><span class="tag" style="background:#EFF6FF;color:#3B82F6">🍝 ${meal.carb}g carbs</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">${meal.note}</div><button class="btn btn-primary btn-sm" style="width:auto;margin-right:8px" onclick='logPhotoMeal(${JSON.stringify(meal)})'>Add to today ✓</button><button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden')">Cancel</button></div>`;
+      result.innerHTML=`<div style="padding:8px 0"><div style="font-size:14px;font-weight:700;margin-bottom:6px">${meal.emoji} ${meal.name}</div><div style="margin-bottom:6px"><span class="tag">🔥 ${meal.cal} cal</span><span class="tag" style="background:#ECFDF5;color:#10B981">💪 ${meal.pro}g protein</span><span class="tag" style="background:#FFFBEB;color:#F59E0B">🥑 ${meal.fat}g fat</span><span class="tag" style="background:#EFF6FF;color:#3B82F6">🍝 ${meal.carb}g carbs</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">${meal.note}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" style="width:auto" onclick='logPhotoMeal(${JSON.stringify(meal)})'>Add to today ✓</button><button class="btn btn-secondary btn-sm" style="width:auto" onclick='saveAsQuickFood(${JSON.stringify(meal)})'>⭐ Quick Add</button><button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden')">Cancel</button></div></div>`;
     }catch(e){
       loading.classList.add('hidden');
       result.innerHTML=`<div style="color:var(--muted);font-size:13px;padding:8px 0">
