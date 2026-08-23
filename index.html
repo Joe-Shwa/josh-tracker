@@ -1645,16 +1645,27 @@ function initGoogleAuth(){
       }catch(e){
         console.error('Reconnect failed:', e);
         updateSyncUI('error');
+        alert('Drive connect failed:\n'+e.message);
       }
     }
   }).requestCode();
 }
 
 async function exchangeCodeForTokens(code){
-  const resp = await fetch(DRIVE_AUTH_WORKER+'/exchange', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code})
-  });
-  if(!resp.ok) throw new Error('exchange-failed');
+  let resp;
+  try{
+    resp = await fetch(DRIVE_AUTH_WORKER+'/exchange', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code})
+    });
+  }catch(networkErr){
+    // fetch() itself threw — usually a CORS block or the Worker being unreachable
+    throw new Error('exchange-network-failed: '+networkErr.message);
+  }
+  if(!resp.ok){
+    let detail='';
+    try{ const body=await resp.json(); detail=body.error||JSON.stringify(body); }catch(e){ detail='(no JSON body)'; }
+    throw new Error('exchange-failed ('+resp.status+'): '+detail);
+  }
   return resp.json(); // {access_token, refresh_token, expires_in}
 }
 
@@ -1928,4 +1939,3 @@ document.addEventListener('visibilitychange', () => {
 </script>
 </body>
 </html>
-
