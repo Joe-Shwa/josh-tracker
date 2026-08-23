@@ -1764,7 +1764,7 @@ async function fullSync(){
     await syncToDrive();
   }catch(e){
     console.error('Full sync failed:', e);
-    if(e.message==='refresh-token-dead') handleDriveAuthFailure();
+    if(e.message==='refresh-token-dead'||e.message==='no-refresh-token') handleDriveAuthFailure();
     else updateSyncUI('error');
   }
 }
@@ -1840,7 +1840,7 @@ async function loadFromDrive(){
     }
   }catch(e){
     console.error('Load from Drive error:', e);
-    if(e.message==='refresh-token-dead') handleDriveAuthFailure();
+    if(e.message==='refresh-token-dead'||e.message==='no-refresh-token') handleDriveAuthFailure();
   }
 }
 
@@ -1874,7 +1874,7 @@ async function syncToDrive(){
     updateSyncUI('synced');
   }catch(e){
     console.error('Drive sync error:', e);
-    if(e.message==='refresh-token-dead') handleDriveAuthFailure();
+    if(e.message==='refresh-token-dead'||e.message==='no-refresh-token') handleDriveAuthFailure();
     else updateSyncUI('error');
   }
 }
@@ -1897,13 +1897,19 @@ window.addEventListener('load', ()=>{
   driveRefreshToken = localStorage.getItem(DRIVE_REFRESH_KEY);
   const savedToken = localStorage.getItem(DRIVE_TOKEN_KEY);
   const savedExpiry = +localStorage.getItem(DRIVE_EXPIRY_KEY) || 0;
-  if(savedToken){ driveAccessToken = savedToken; driveTokenExpiry = savedExpiry; }
+  if(savedToken && savedExpiry){
+    driveAccessToken = savedToken; driveTokenExpiry = savedExpiry;
+  } else if(savedToken){
+    // A token with no recorded expiry is a leftover from the old (pre-refresh-token) auth flow —
+    // it can't be silently refreshed, so don't trust it. Clear it and require one real reconnect.
+    localStorage.removeItem(DRIVE_TOKEN_KEY);
+  }
   if(driveRefreshToken || driveAccessToken){
     findOrCreateDriveFile().then(()=>{
       loadFromDrive();
       updateSyncUI('synced');
     }).catch((e)=>{
-      if(e.message==='refresh-token-dead') handleDriveAuthFailure();
+      if(e.message==='refresh-token-dead'||e.message==='no-refresh-token') handleDriveAuthFailure();
       else { updateSyncUI('error'); checkDriveBannerOnLoad(); }
     });
   } else {
@@ -1922,3 +1928,4 @@ document.addEventListener('visibilitychange', () => {
 </script>
 </body>
 </html>
+
