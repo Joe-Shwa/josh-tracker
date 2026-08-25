@@ -663,7 +663,7 @@ let S = {
   water: [],
   movement: [],
   streak: { count: 0, longest: 0, log: [] },
-  weights: [{date:'19/07/2026',weight:106},{date:'10/08/2026',weight:103.8}],
+  weights: [{id:'w_seed_1',date:'19/07/2026',weight:106,updatedAt:1721347200000},{id:'w_seed_2',date:'10/08/2026',weight:103.8,updatedAt:1754784000000}],
   sleep: [],
   supps: {b_complex:false,mag:false,fish_oil:false},
   supplements: null,
@@ -698,6 +698,24 @@ function mergeById(localArr,driveArr,type){
   tomb.forEach(id=>{delete map[id];});
   return Object.values(map);
 }
+// Collapse duplicate weight entries for the same date — old bug: a fresh/cleared browser session
+// used to re-mint random ids for the two hardcoded seed entries every load, so a merge with Drive's
+// history (id-keyed, blind to date) would keep adding "new" copies of the same date. Seed entries now
+// carry fixed ids so this shouldn't recur, but this cleans up whatever duplicates already exist. Keeps
+// whichever duplicate has the newest updatedAt. Must run on ANY change to S.weights, not just the
+// initial local load — the corruption re-appears after a Drive merge if this only runs once at start.
+function dedupeWeightsByDate(){
+  const byDate=new Map();
+  (S.weights||[]).forEach(w=>{
+    const cur=byDate.get(w.date);
+    if(!cur || (w.updatedAt||0) > (cur.updatedAt||0)) byDate.set(w.date, w);
+  });
+  if(byDate.size < (S.weights||[]).length){
+    S.weights = [...byDate.values()].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    return true;
+  }
+  return false;
+}
 // Backfill id/updatedAt onto any entries created before this update, so old data keeps working.
 function migrateArr(arr,prefix,dateField){
   (arr||[]).forEach(e=>{
@@ -727,19 +745,7 @@ function migrateState(){
   }
   if(S.today) delete S.today.water;
   migrateArr(S.weights,'w');
-  // Collapse duplicate weight entries for the same date — a past bug in logWeight()/chatLogWeight()
-  // created a new row every time instead of updating the existing one for that day. Keep whichever
-  // duplicate has the newest updatedAt.
-  {
-    const byDate=new Map();
-    S.weights.forEach(w=>{
-      const cur=byDate.get(w.date);
-      if(!cur || (w.updatedAt||0) > (cur.updatedAt||0)) byDate.set(w.date, w);
-    });
-    if(byDate.size < S.weights.length){
-      S.weights = [...byDate.values()].sort((a,b)=>new Date(a.date)-new Date(b.date));
-    }
-  }
+  dedupeWeightsByDate();
   migrateArr(S.sleep,'sleep');
   migrateArr(S.meals,'meal','date');
   // A past bug could store cal/pro/fat/carb as strings if the AI's JSON response quoted a number —
@@ -2395,6 +2401,7 @@ async function loadFromDrive(){
         }
         // Merge by id+updatedAt — newest version of each entry wins, deletions respected via tombstones
         S.weights = mergeById(S.weights, driveData.weights, 'w').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
+        dedupeWeightsByDate(); // clean up any same-date duplicates the Drive merge just re-introduced
         S.sleep = mergeById(S.sleep, driveData.sleep, 'sleep').sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
         S.peptides = mergeById(S.peptides, driveData.peptides, 'peptide');
         S.peptideLogs = mergeById(S.peptideLogs, driveData.peptideLogs, 'pep_log').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
