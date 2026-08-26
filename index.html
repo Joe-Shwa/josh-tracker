@@ -233,6 +233,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="input-label">Goal weight — midpoint (kg)</div>
       <input class="input-field" id="s-goal" type="number" step="0.1" value="92">
     </div>
+    <div class="form-group">
+      <div class="input-label">Training level</div>
+      <select class="input-field" id="s-training">
+        <option value="general">General health / not training specifically</option>
+        <option value="recreational" selected>Recreational gym-goer / staying fit</option>
+        <option value="athlete">Competitive athlete / bodybuilder</option>
+      </select>
+    </div>
     <div class="suggestion-box" id="s-suggestion"></div>
     <button class="btn btn-secondary btn-sm" style="margin-bottom:10px;width:auto" onclick="calcTargets()">Recalculate →</button>
     <button class="btn btn-primary" onclick="finishSetup()">Start tracking ✓</button>
@@ -252,6 +260,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div class="settings-section-title">Tracked Nutrients</div>
     <div class="settings-hint">Calories and Protein always track — your streak depends on them.</div>
     <div id="settings-nutrients-list"></div>
+
+    <div class="settings-section-title">Training Level</div>
+    <div class="settings-hint">Sets how aggressively your protein target scales — everything else (calories, fat, carbs) follows from that.</div>
+    <div class="form-group">
+      <select class="input-field" id="pf-training">
+        <option value="general">General health / not training specifically</option>
+        <option value="recreational">Recreational gym-goer / staying fit</option>
+        <option value="athlete">Competitive athlete / bodybuilder</option>
+      </select>
+    </div>
+
+    <div class="settings-section-title">Dietitian / Custom Targets</div>
+    <p class="settings-hint">Leave any field blank to keep the auto-calculated value. Fill one in to override it — e.g. if a dietitian has given you specific numbers.</p>
+    <div class="macro-fields" id="pf-override-fields">
+      <div class="macro-field-wrap"><div class="input-label">Cal</div><input class="input-field" id="pf-ov-cals" type="number" placeholder="auto"></div>
+      <div class="macro-field-wrap"><div class="input-label">Protein g</div><input class="input-field" id="pf-ov-protein" type="number" placeholder="auto"></div>
+      <div class="macro-field-wrap"><div class="input-label">Fat g</div><input class="input-field" id="pf-ov-fat" type="number" placeholder="auto"></div>
+      <div class="macro-field-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="pf-ov-carb" type="number" placeholder="auto"></div>
+    </div>
 
     <button class="btn btn-primary" style="margin-top:16px" onclick="closeSettings()">Done</button>
   </div>
@@ -832,6 +859,18 @@ function migrateState(){
   // Body measurements — dated log, one entry per day, same pattern as weight/sleep/movement
   if(!S.measurements)S.measurements=[];
   migrateArr(S.measurements,'ms','date');
+
+  // Training level + dietitian override backfill — guarded on S.profile existing (it's null pre-setup).
+  // 'recreational' (mult 1.0) reproduces the old static goal*2 protein formula exactly, so this is a
+  // silent no-op for anyone who already has a profile and never touches the new setting.
+  if(S.profile){
+    if(!S.profile.trainingLevel)S.profile.trainingLevel='recreational';
+    if(!S.profile.overrides){
+      S.profile.overrides={cals:null,protein:null,fat:null,carbs:null};
+    } else {
+      ['cals','protein','fat','carbs'].forEach(k=>{ if(!(k in S.profile.overrides)) S.profile.overrides[k]=null; });
+    }
+  }
 }
 
 const RETA_START = new Date('2026-08-02');
@@ -901,6 +940,15 @@ const MEASURE_FIELDS = [
   {key:'calf', label:'Calf', unit:'cm', single:false, tip:'Widest point, standing normally.'},
 ];
 
+// ─── TRAINING LEVEL: scales protein aggressiveness off the same static formula Josh already had.
+// 'recreational' (mult:1.0) is the default and exactly reproduces the pre-existing goal*2 protein
+// calc — nothing changes for anyone who never touches this setting.
+const TRAINING_LEVELS = {
+  general:      {label:'General health / not training specifically', mult:0.85},
+  recreational: {label:'Recreational gym-goer / staying fit',         mult:1.0},
+  athlete:      {label:'Competitive athlete / bodybuilder',           mult:1.25}
+};
+
 // ─── SETTINGS: tabs & nutrients ────────────────────────────────────────────────
 // Today/Log/Move are permanently on and not listed here. Everything else is toggleable.
 const OPTIONAL_TABS = [
@@ -916,13 +964,46 @@ const NUTRIENT_TOGGLES = [
   {id:'carb',label:'Carbs'},
   {id:'fib',label:'Fiber'},
 ];
-function openSettings(){ renderSettingsPanel(); document.getElementById('settings-overlay').classList.remove('hidden'); }
-function closeSettings(){ document.getElementById('settings-overlay').classList.add('hidden'); }
+function openSettings(){ renderSettingsPanel(); populateProfileSettings(); document.getElementById('settings-overlay').classList.remove('hidden'); }
+function closeSettings(){ saveProfileSettings(); document.getElementById('settings-overlay').classList.add('hidden'); }
 function renderSettingsPanel(){
   const tabsList=document.getElementById('settings-tabs-list');
   tabsList.innerHTML=OPTIONAL_TABS.map(t=>`<div class="pill-row"><div class="pill-name">${t.label}</div><div class="pill-check ${S.settings.tabs[t.id]?'done':''}" onclick="toggleTabSetting('${t.id}')">${S.settings.tabs[t.id]?'✓':''}</div></div>`).join('');
   const nutList=document.getElementById('settings-nutrients-list');
   nutList.innerHTML=NUTRIENT_TOGGLES.map(n=>`<div class="pill-row"><div class="pill-name">${n.label}</div><div class="pill-check ${S.settings.nutrients[n.id]?'done':''}" onclick="toggleNutrientSetting('${n.id}')">${S.settings.nutrients[n.id]?'✓':''}</div></div>`).join('');
+}
+// Fills the Training Level select + override inputs from the current profile whenever Settings opens.
+function populateProfileSettings(){
+  if(!S.profile)return;
+  const sel=document.getElementById('pf-training');
+  if(sel)sel.value=S.profile.trainingLevel||'recreational';
+  const ov=S.profile.overrides||{};
+  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=(v===null||v===undefined)?'':v;};
+  setVal('pf-ov-cals',ov.cals);
+  setVal('pf-ov-protein',ov.protein);
+  setVal('pf-ov-fat',ov.fat);
+  setVal('pf-ov-carb',ov.carbs);
+}
+// Reads Training Level + override fields back out, recomputes final macros, and persists them onto
+// S.profile — called whenever Settings closes so Today reflects the change immediately.
+function saveProfileSettings(){
+  if(!S.profile)return;
+  const sel=document.getElementById('pf-training');
+  if(sel)S.profile.trainingLevel=sel.value||'recreational';
+  const readOv=(id)=>{const el=document.getElementById(id);if(!el)return null;const v=el.value;return (v===''||v===null)?null:+v;};
+  S.profile.overrides={
+    cals:readOv('pf-ov-cals'),
+    protein:readOv('pf-ov-protein'),
+    fat:readOv('pf-ov-fat'),
+    carbs:readOv('pf-ov-carb')
+  };
+  const final=computeFinalMacros(S.profile,S.profile.overrides);
+  S.profile.cals=final.cals;
+  S.profile.protein=final.protein;
+  S.profile.fat=final.fat;
+  S.profile.carbs=final.carbs;
+  saveLocal();
+  updateAll();
 }
 function toggleTabSetting(id){
   S.settings.tabs[id]=!S.settings.tabs[id];
@@ -995,19 +1076,47 @@ function checkDayReset(){
 function updateDate(){const el=document.getElementById('h-date');if(el)el.textContent=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'});}
 function showApp(){document.getElementById('setup-overlay').classList.add('hidden');document.getElementById('main-header').classList.remove('hidden');document.getElementById('main-nav').classList.remove('hidden');document.querySelectorAll('.section').forEach(s=>s.classList.remove('hidden'));applyTabSettings();}
 
+// ─── MACRO ENGINE ─────────────────────────────────────────────────────────────
+// Same static formula Josh's tracker always used, with protein scaled by training level.
+// trainingLevel 'recreational' (mult 1.0) reproduces the original goal*2 protein exactly.
+function computeMacros(p){
+  const goal=p.goal;
+  const mult=(TRAINING_LEVELS[p.trainingLevel]||TRAINING_LEVELS.recreational).mult;
+  const cals=Math.round(goal*26);
+  const protein=Math.round(goal*2*mult);
+  const fat=Math.round(cals/30);
+  const carbs=Math.max(50,Math.round((cals-protein*4-fat*9)/4));
+  const water=Math.round((goal/30)*1000);
+  return {cals,protein,fat,carbs,water};
+}
+// Overlays any non-null/non-empty dietitian override fields onto the computed result.
+function computeFinalMacros(p,overrides){
+  const base=computeMacros(p);
+  const ov=overrides||{};
+  const pick=(key,ovKey)=> (ov[ovKey||key]!==null && ov[ovKey||key]!==undefined && ov[ovKey||key]!=='') ? +ov[ovKey||key] : base[key];
+  const cals=pick('cals');
+  const protein=pick('protein');
+  const fat=pick('fat');
+  const carbs=pick('carbs');
+  const hasOverrides=['cals','protein','fat','carbs'].some(k=>ov[k]!==null && ov[k]!==undefined && ov[k]!=='');
+  return {cals,protein,fat,carbs,water:base.water,hasOverrides};
+}
+
 // ─── SETUP ────────────────────────────────────────────────────────────────────
 function calcTargets(){
   const goal=parseFloat(document.getElementById('s-goal').value)||92;
-  const cals=Math.round(goal*26),protein=Math.round(goal*2),fat=Math.round(cals/30),carbs=Math.round((cals-protein*4-fat*9)/4),water=Math.round((goal/30)*1000);
+  const trainingLevel=document.getElementById('s-training')?document.getElementById('s-training').value:'recreational';
+  const {cals,protein,fat,carbs,water}=computeMacros({goal,trainingLevel});
   const box=document.getElementById('s-suggestion');box.style.display='block';
   box.innerHTML=`<strong>At ${goal}kg:</strong> ${cals} cal · ${protein}g protein · ${fat}g fat · ${carbs}g carbs · ${(water/1000).toFixed(1)}L water`;
-  S._pending={cals,protein,fat,carbs,water};
+  S._pending={cals,protein,fat,carbs,water,trainingLevel};
 }
 function finishSetup(){
   const cur=parseFloat(document.getElementById('s-cur').value)||103.8;
   const goal=parseFloat(document.getElementById('s-goal').value)||92;
-  if(!S._pending)S._pending={cals:2392,protein:184,fat:80,carbs:234,water:3100};
-  S.profile={name:'Josh',current:106,goal,height:184,age:47,...S._pending};
+  const trainingLevel=document.getElementById('s-training')?document.getElementById('s-training').value:'recreational';
+  if(!S._pending)S._pending={...computeMacros({goal,trainingLevel}),trainingLevel};
+  S.profile={name:'Josh',current:106,goal,height:184,age:47,...S._pending,trainingLevel,overrides:{cals:null,protein:null,fat:null,carbs:null}};
   if(!S.weights.find(w=>w.weight===cur))S.weights.push({id:newId('w'),updatedAt:Date.now(),date:new Date().toDateString(),weight:cur});
   saveLocal();showApp();renderViewDate();
 }
@@ -1061,6 +1170,7 @@ function addWater(ml){
   saveLocal();updateWater();
 }
 function delWater(id){S.water=S.water.filter(w=>w.id!==id);markDeleted('water',id);saveLocal();updateWater();}
+
 let mealEditId=null;
 function updateMealsList(){
   const el=document.getElementById('meals-list');
