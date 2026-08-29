@@ -1368,44 +1368,101 @@ function editLookup(){
 }
 
 // ─── PHOTO LOG ────────────────────────────────────────────────────────────────
+let lastPhotoB64=null,lastPhotoType=null,currentPhotoMeal=null;
+function phEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function handleMealPhoto(event){
   const file=event.target.files[0];if(!file)return;
   const preview=document.getElementById('ph-preview'),img=document.getElementById('ph-img'),loading=document.getElementById('ph-loading'),result=document.getElementById('ph-result');
   const reader=new FileReader();
   reader.onload=async e=>{
     img.src=e.target.result;preview.classList.remove('hidden');loading.classList.remove('hidden');result.innerHTML='';
-    try{
-      const b64=e.target.result.split(',')[1];
-      const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          model:'claude-sonnet-4-6',max_tokens:400,
-          messages:[{role:'user',content:[
-            {type:'image',source:{type:'base64',media_type:file.type,data:b64}},
-            {type:'text',text:'Analyse this meal photo for a 47yo male, 184cm, ~104kg, 184g daily protein target. Cooked weight assumed. Return ONLY valid JSON: {"name":"meal description","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}'}
-          ]}]
-        })
-      });
-      const data=await resp.json();
-      if(data.error){throw new Error(data.error.message);}
-      const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
-      const clean=text.replace(/```json\n?|```/g,'').trim();
-      const meal=JSON.parse(clean);
-      meal.cal=+meal.cal||0;meal.pro=+meal.pro||0;meal.fat=+meal.fat||0;meal.carb=+meal.carb||0;meal.fib=+meal.fib||0;
-      loading.classList.add('hidden');
-      result.innerHTML=`<div style="padding:8px 0"><div style="font-size:14px;font-weight:700;margin-bottom:6px">${meal.emoji} ${meal.name}</div><div style="margin-bottom:6px"><span class="tag">🔥 ${meal.cal} cal</span><span class="tag" style="background:#ECFDF5;color:#10B981">💪 ${meal.pro}g protein</span><span class="tag" style="background:#FFFBEB;color:#F59E0B">🥑 ${meal.fat}g fat</span><span class="tag" style="background:#EFF6FF;color:#3B82F6">🍝 ${meal.carb}g carbs</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">${meal.note}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" style="width:auto" onclick='logPhotoMeal(${JSON.stringify(meal)})'>Add to today ✓</button><button class="btn btn-secondary btn-sm" style="width:auto" onclick='saveAsQuickFood(${JSON.stringify(meal)})'>⭐ Quick Add</button><button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden')">Cancel</button></div></div>`;
-    }catch(e){
-      loading.classList.add('hidden');
+    lastPhotoB64=e.target.result.split(',')[1];lastPhotoType=file.type;currentPhotoMeal=null;
+    const prompt='Analyse this meal photo for a 47yo male, 184cm, ~104kg, 184g daily protein target. Cooked weight assumed. Return ONLY valid JSON: {"name":"meal description","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}';
+    await analysePhotoAndRender(prompt,loading,result);
+  };
+  reader.readAsDataURL(file);event.target.value='';
+}
+async function analysePhotoAndRender(promptText,loading,result){
+  try{
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',max_tokens:400,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:lastPhotoType,data:lastPhotoB64}},
+          {type:'text',text:promptText}
+        ]}]
+      })
+    });
+    const data=await resp.json();
+    if(data.error){throw new Error(data.error.message);}
+    const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+    const clean=text.replace(/```json\n?|```/g,'').trim();
+    const meal=JSON.parse(clean);
+    meal.cal=+meal.cal||0;meal.pro=+meal.pro||0;meal.fat=+meal.fat||0;meal.carb=+meal.carb||0;meal.fib=+meal.fib||0;
+    currentPhotoMeal=meal;
+    loading.classList.add('hidden');
+    renderPhotoResult(meal);
+  }catch(e){
+    loading.classList.add('hidden');
+    if(currentPhotoMeal){
+      const err=document.getElementById('ph-rescan-error');
+      if(err)err.textContent="Couldn't re-analyse this photo — your fields above are unchanged. Try Re-scan again, or edit the fields manually.";
+    }else{
       result.innerHTML=`<div style="color:var(--muted);font-size:13px;padding:8px 0">
         <p style="margin-bottom:8px">Couldn't analyse this photo. Try the <strong>Look Up Macros</strong> section instead — type what's on your plate and it'll estimate from the description.</p>
         <button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden');showTab('log',document.querySelectorAll('.nav-tab')[1])">Use text lookup →</button>
       </div>`;
     }
-  };
-  reader.readAsDataURL(file);event.target.value='';
+  }
 }
-function logPhotoMeal(m){addMeal(m);document.getElementById('ph-preview').classList.add('hidden');}
+function renderPhotoResult(meal){
+  const result=document.getElementById('ph-result');
+  result.innerHTML=`<div style="padding:8px 0">
+    <div class="form-group"><div class="input-label">Food (edit if the AI got it wrong)</div><input class="input-field" id="ph-name" value="${phEsc(meal.name)}"></div>
+    <div class="macro-fields has-fiber" id="ph-macro-fields">
+      <div class="macro-field-wrap"><div class="input-label">Cal</div><input class="input-field" id="ph-cal" type="number" value="${meal.cal}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Protein g</div><input class="input-field" id="ph-pro" type="number" value="${meal.pro}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Fat g</div><input class="input-field" id="ph-fat" type="number" value="${meal.fat}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="ph-carb" type="number" value="${meal.carb}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Fiber g</div><input class="input-field" id="ph-fib" type="number" value="${meal.fib}"></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${phEsc(meal.note||'')}</div>
+    <div id="ph-rescan-error" style="font-size:12px;color:#EF4444;margin-bottom:6px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" style="width:auto" onclick="logPhotoMealFromFields()">Add to today ✓</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="saveAsQuickFood(getPhotoFieldsAsMeal())">⭐ Quick Add</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="rescanMealPhoto()">🔄 Re-scan</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden')">Cancel</button>
+    </div>
+  </div>`;
+}
+function getPhotoFieldsAsMeal(){
+  return {
+    name:document.getElementById('ph-name').value,
+    cal:document.getElementById('ph-cal').value,
+    pro:document.getElementById('ph-pro').value,
+    fat:document.getElementById('ph-fat').value,
+    carb:document.getElementById('ph-carb').value,
+    fib:document.getElementById('ph-fib').value,
+    emoji:(currentPhotoMeal&&currentPhotoMeal.emoji)||'🍽️'
+  };
+}
+function logPhotoMealFromFields(){
+  addMeal(getPhotoFieldsAsMeal());
+  document.getElementById('ph-preview').classList.add('hidden');
+}
+async function rescanMealPhoto(){
+  if(!lastPhotoB64)return;
+  const nameInput=document.getElementById('ph-name');
+  const correctedName=nameInput?nameInput.value.trim():'';
+  const loading=document.getElementById('ph-loading'),result=document.getElementById('ph-result');
+  const errEl=document.getElementById('ph-rescan-error');if(errEl)errEl.textContent='';
+  loading.classList.remove('hidden');
+  const prompt=`Analyse this meal photo again. The user has told you the correct food identification is: "${correctedName}" — trust that identification over your first guess, but keep reassessing the portion size and macros directly from what you see in the photo (cooked weight assumed). Return ONLY valid JSON: {"name":"...","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}`;
+  await analysePhotoAndRender(prompt,loading,result);
+}
 
 // ─── WEIGHT ───────────────────────────────────────────────────────────────────
 function logWeight(){
