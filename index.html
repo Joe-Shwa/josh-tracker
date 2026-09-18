@@ -1511,8 +1511,25 @@ function updateWeight(){
   document.getElementById('w-history').innerHTML=[...S.weights].sort((a,b)=>weightDateMs(b.date)-weightDateMs(a.date)).slice(0,10).map(e=>{
     const parsed=parseAnyDate(e.date);
     const dispDate=parsed?parsed.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}):e.date;
-    return `<div class="history-row"><span>${dispDate}</span><span style="font-weight:700">${e.weight} kg</span></div>`;
+    return `<div class="history-row"><span>${dispDate}</span><span style="font-weight:700">${e.weight} kg <span class="meal-del" style="font-size:15px" onclick="delWeight('${e.id}')" title="Delete">×</span></span></div>`;
   }).join('')||'No entries yet.';
+}
+function delWeight(id){
+  S.weights=S.weights.filter(w=>w.id!==id);
+  markDeleted('w',id);
+  saveLocal();
+  updateWeight();
+  loadWeightIntoForm();
+}
+// Paging to a past day (or reloading on today) shows whatever weight is already logged for that
+// date in the input field, so you can see it and correct it instead of guessing whether typing a
+// new number will overwrite it. Deliberately NOT part of updateAll() — same reasoning as
+// loadMeasurementsIntoForm() below: updateAll() also runs on every background Drive re-sync, and
+// re-populating this field then would blow away whatever you're mid-typing.
+function loadWeightIntoForm(){
+  const existing=weightForDate(viewDateStr());
+  const el=document.getElementById('w-input');
+  if(el)el.value=existing?existing.weight:'';
 }
 
 // ─── MEASUREMENTS ─────────────────────────────────────────────────────────────
@@ -1957,6 +1974,7 @@ function renderViewDate(){
   }
   updateAll();
   loadMeasurementsIntoForm(); // only on an actual day change/initial load — see note in updateAll()
+  loadWeightIntoForm(); // same reasoning — see note above delWeight()
   updateOtherLogs();
 }
 // Sleep/weight/movement/measurements summary for the viewed day — only shown when paging back, since those already have their own live tabs for today
