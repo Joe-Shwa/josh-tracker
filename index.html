@@ -280,6 +280,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="macro-field-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="pf-ov-carb" type="number" placeholder="auto"></div>
     </div>
 
+    <div class="settings-section-title">Export Data</div>
+    <p class="settings-hint">Pick a date range and what to include, then export as a spreadsheet (CSV) or a printable report. Runs entirely on your device.</p>
+    <div class="macro-fields" style="grid-template-columns:1fr 1fr">
+      <div class="macro-field-wrap"><div class="input-label">From</div><input class="input-field" id="exp-from" type="date"></div>
+      <div class="macro-field-wrap"><div class="input-label">To</div><input class="input-field" id="exp-to" type="date"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin:10px 0">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-weights" checked> Weigh-ins</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-measurements" checked> Measurements</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-meals" checked> Macros / Meals</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-movement" checked> Calories Burnt / Steps</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-sleep" checked> Sleep</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-water"> Water</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-peptides"> Peptide Doses</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)"><input type="checkbox" id="exp-cat-fasting"> Fasting Sessions</label>
+    </div>
+    <div class="form-group">
+      <select class="input-field" id="exp-format">
+        <option value="csv">Spreadsheet (CSV)</option>
+        <option value="print">Printable report</option>
+      </select>
+    </div>
+    <button class="btn btn-secondary" style="margin-bottom:4px" onclick="runExport()">Export ↓</button>
+    <div class="settings-hint" id="exp-status" style="min-height:14px"></div>
+
     <button class="btn btn-primary" style="margin-top:16px" onclick="closeSettings()">Done</button>
   </div>
 </div>
@@ -408,6 +433,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <img id="ph-img" style="width:100%;border-radius:10px;max-height:180px;object-fit:cover;margin-bottom:10px">
       <div id="ph-loading" class="hidden" style="text-align:center;padding:14px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing...</div></div>
       <div id="ph-result"></div>
+    </div>
+  </div>
+
+  <!-- LEFTOVERS -->
+  <div class="card">
+    <div class="card-title">🍽️ Log Leftovers</div>
+    <div class="info-box blue" style="margin-top:-4px">Didn't finish a plate? Photograph what's left, then either log it as its own entry or deduct it from the meal you just logged.</div>
+
+    <input type="file" id="lo-camera" accept="image/*" capture="environment" class="hidden" onchange="handleLeftoverPhoto(event)">
+    <input type="file" id="lo-gallery" accept="image/*" class="hidden" onchange="handleLeftoverPhoto(event)">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-primary" style="flex:1" onclick="document.getElementById('lo-camera').click()">📷 Take Photo</button>
+      <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('lo-gallery').click()">🖼️ From Gallery</button>
+    </div>
+    <div id="lo-preview" class="hidden">
+      <img id="lo-img" style="width:100%;border-radius:10px;max-height:180px;object-fit:cover;margin-bottom:10px">
+      <div id="lo-loading" class="hidden" style="text-align:center;padding:14px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing...</div></div>
+      <div id="lo-result"></div>
     </div>
   </div>
 
@@ -949,6 +992,139 @@ const TRAINING_LEVELS = {
   athlete:      {label:'Competitive athlete / bodybuilder',           mult:1.25}
 };
 
+// ─── DATA EXPORT ────────────────────────────────────────────────────────────
+// Pulls a date-ranged, category-selected export of your tracked data — either a CSV for
+// spreadsheets, or a printable report (opens in a new tab; use the browser's Share/Print
+// button to save it as a PDF). Everything happens on-device, nothing is sent anywhere.
+function csvEscape(v){
+  if(v==null)return '';
+  const s=String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function csvRow(arr){return arr.map(csvEscape).join(',');}
+// Records in S are dated with either a toDateString() string ("Tue Aug 25 2026") or, for the
+// two legacy weight seeds, DD/MM/YYYY — parseAnyDate already handles both (see above). If a
+// row's date can't be parsed for some reason, include it rather than silently dropping data.
+function expDateInRange(dateStr,fromMs,toMs){
+  const d=parseAnyDate(dateStr);
+  if(!d)return true;
+  const ms=d.getTime();
+  return (fromMs==null||ms>=fromMs)&&(toMs==null||ms<=toMs);
+}
+function peptideNameById(id){const p=(S.peptides||[]).find(p=>p.id===id);return p?p.name:id;}
+
+function buildExportSections(cats,fromMs,toMs){
+  const sections=[];
+  if(cats.weights){
+    const rows=[...(S.weights||[])].filter(w=>expDateInRange(w.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Weigh-ins',headers:['Date','Weight (kg)'],rows:rows.map(w=>[w.date,w.weight])});
+  }
+  if(cats.measurements){
+    const rows=[...(S.measurements||[])].filter(m=>expDateInRange(m.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    const headers=['Date','Notes',...MEASURE_FIELDS.flatMap(f=>f.single?[f.label]:[f.label+' L',f.label+' R'])];
+    sections.push({title:'Measurements',headers,rows:rows.map(m=>[m.date,m.notes||'',...MEASURE_FIELDS.flatMap(f=>f.single?[m[f.key]??'']:[m[f.key+'_l']??'',m[f.key+'_r']??''])])});
+  }
+  if(cats.meals){
+    const rows=[...(S.meals||[])].filter(m=>expDateInRange(m.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Macros / Meals',headers:['Date','Time','Item','Calories','Protein (g)','Fat (g)','Carbs (g)','Fibre (g)'],rows:rows.map(m=>[m.date,m.time||'',m.name||'',m.cal||0,m.pro||0,m.fat||0,m.carb||0,m.fib||0])});
+  }
+  if(cats.movement){
+    const rows=[...(S.movement||[])].filter(m=>expDateInRange(m.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Calories Burnt / Steps',headers:['Date','Steps','Calories Burnt'],rows:rows.map(m=>[m.date,m.steps||0,m.calBurned||0])});
+  }
+  if(cats.sleep){
+    const rows=[...(S.sleep||[])].filter(s=>expDateInRange(s.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Sleep',headers:['Date','Total (hrs)','Deep (hrs)','REM (hrs)','Notes'],rows:rows.map(s=>[s.date,s.total,s.deep||0,s.rem||0,s.notes||''])});
+  }
+  if(cats.water){
+    const rows=[...(S.water||[])].filter(w=>expDateInRange(w.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Water',headers:['Date','ml'],rows:rows.map(w=>[w.date,w.ml])});
+  }
+  if(cats.peptides){
+    const rows=[...(S.peptideLogs||[])].filter(p=>expDateInRange(p.date,fromMs,toMs)).sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    sections.push({title:'Peptide Doses',headers:['Date','Peptide','Units','mg','Notes'],rows:rows.map(p=>[p.date,peptideNameById(p.peptideId),p.units,p.mg,p.notes||''])});
+  }
+  if(cats.fasting){
+    const rows=[...((S.fasting&&S.fasting.log)||[])].filter(f=>expDateInRange(new Date(f.startedAt).toDateString(),fromMs,toMs)).sort((a,b)=>(a.startedAt||0)-(b.startedAt||0));
+    sections.push({title:'Fasting Sessions',headers:['Started','Ended','Target (hrs)','Actual (hrs)'],rows:rows.map(f=>[new Date(f.startedAt).toLocaleString('en-AU'),f.endedAt?new Date(f.endedAt).toLocaleString('en-AU'):'',f.targetHours,f.actualHours!=null?f.actualHours.toFixed(1):''])});
+  }
+  return sections;
+}
+
+function runExport(){
+  const cats={
+    weights:document.getElementById('exp-cat-weights').checked,
+    measurements:document.getElementById('exp-cat-measurements').checked,
+    meals:document.getElementById('exp-cat-meals').checked,
+    movement:document.getElementById('exp-cat-movement').checked,
+    sleep:document.getElementById('exp-cat-sleep').checked,
+    water:document.getElementById('exp-cat-water').checked,
+    peptides:document.getElementById('exp-cat-peptides').checked,
+    fasting:document.getElementById('exp-cat-fasting').checked,
+  };
+  const statusEl=document.getElementById('exp-status');
+  if(!Object.values(cats).some(Boolean)){
+    statusEl.textContent='Pick at least one category.';
+    return;
+  }
+  const fromVal=document.getElementById('exp-from').value;
+  const toVal=document.getElementById('exp-to').value;
+  const fromMs=fromVal?new Date(fromVal+'T00:00:00').getTime():null;
+  const toMs=toVal?new Date(toVal+'T23:59:59').getTime():null;
+  const sections=buildExportSections(cats,fromMs,toMs);
+  const format=document.getElementById('exp-format').value;
+  const stamp=new Date().toISOString().slice(0,10);
+  if(format==='csv'){
+    let out='';
+    sections.forEach(sec=>{
+      out+='=== '+sec.title+' ===\n';
+      out+=csvRow(sec.headers)+'\n';
+      sec.rows.forEach(r=>{out+=csvRow(r)+'\n';});
+      out+='\n';
+    });
+    const blob=new Blob([out],{type:'text/csv'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='josh-tracker-export-'+stamp+'.csv';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+    statusEl.textContent='CSV downloaded.';
+  } else {
+    const html=buildReportHtml(sections,fromVal,toVal);
+    const blob=new Blob([html],{type:'text/html'});
+    const url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    statusEl.textContent='Report opened in a new tab — use Share → Print to save as PDF.';
+  }
+}
+
+function buildReportHtml(sections,fromVal,toVal){
+  const rangeLabel=(fromVal||toVal)?((fromVal||'earliest')+' to '+(toVal||'latest')):'Full history';
+  const secHtml=sections.map(sec=>`
+    <h2>${sec.title}</h2>
+    ${sec.rows.length?`<table>
+      <thead><tr>${sec.headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${sec.rows.map(r=>`<tr>${r.map(c=>`<td>${c===''||c==null?'—':c}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`:`<p class="empty">No entries in this range.</p>`}
+  `).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Josh's Tracker — Export</title>
+  <style>
+    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a2332;padding:24px;max-width:800px;margin:0 auto}
+    h1{font-size:20px;margin-bottom:2px}
+    .sub{color:#667;font-size:13px;margin-bottom:24px}
+    h2{font-size:15px;margin-top:28px;margin-bottom:8px;border-bottom:2px solid #e2e8f0;padding-bottom:4px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eef1f4}
+    th{background:#f7f9fb;font-weight:600}
+    .empty{color:#98a2b3;font-size:12px;font-style:italic}
+    @media print{ body{padding:0} h2{page-break-after:avoid} tr{page-break-inside:avoid} }
+  </style></head><body>
+  <h1>Josh's Tracker — Data Export</h1>
+  <div class="sub">${rangeLabel} · generated ${new Date().toLocaleString('en-AU')}</div>
+  ${secHtml}
+  </body></html>`;
+}
+
 // ─── SETTINGS: tabs & nutrients ────────────────────────────────────────────────
 // Today/Log/Move are permanently on and not listed here. Everything else is toggleable.
 const OPTIONAL_TABS = [
@@ -1177,7 +1353,12 @@ function updateMealsList(){
   const meals=mealsForDate(viewDateStr());
   if(!meals.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No meals logged yet.</div>';return;}
   const fibOn=S.settings&&S.settings.nutrients&&S.settings.nutrients.fib;
-  el.innerHTML=meals.map(m=>`<div class="meal-item"><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs${fibOn?' · '+(m.fib||0)+'g fiber':''}</div></div><span class="meal-del" style="font-size:17px" onclick="editMeal('${m.id}')" title="Edit">✎</span><div class="meal-del" onclick="delMeal('${m.id}')" title="Delete">×</div></div>`).join('');
+  // Deduction lines (from the Leftovers feature) get a dashed/tinted style so they read as an
+  // adjustment rather than a separate food item, without needing a whole new CSS class.
+  el.innerHTML=meals.map(m=>{
+    const dedStyle=m.isDeduction?' style="border:1px dashed var(--border);background:var(--amber-pale)"':'';
+    return `<div class="meal-item"${dedStyle}><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs${fibOn?' · '+(m.fib||0)+'g fiber':''}</div></div><span class="meal-del" style="font-size:17px" onclick="editMeal('${m.id}')" title="Edit">✎</span><div class="meal-del" onclick="delMeal('${m.id}')" title="Delete">×</div></div>`;
+  }).join('');
 }
 function delMeal(id){if(mealEditId===id)cancelMealEdit();S.meals=S.meals.filter(m=>m.id!==id);markDeleted('meal',id);saveLocal();updateAll();}
 function addMeal(m){S.meals.push({...m,cal:+m.cal||0,pro:+m.pro||0,fat:+m.fat||0,carb:+m.carb||0,fib:+m.fib||0,id:newId('meal'),date:viewDateStr(),updatedAt:Date.now(),time:new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})});saveLocal();updateAll();}
@@ -1462,6 +1643,114 @@ async function rescanMealPhoto(){
   loading.classList.remove('hidden');
   const prompt=`Analyse this meal photo again. The user has told you the correct food identification is: "${correctedName}" — trust that identification over your first guess, but keep reassessing the portion size and macros directly from what you see in the photo (cooked weight assumed). Return ONLY valid JSON: {"name":"...","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}`;
   await analysePhotoAndRender(prompt,loading,result);
+}
+
+// ─── LEFTOVERS ──────────────────────────────────────────────────────────────
+// Photograph what's left on the plate after a meal. Reuses the same Worker/photo-analysis call
+// as the main Photo Log, but keeps its own state (lastLeftoverB64 etc.) so a leftovers scan can
+// never clobber an in-progress meal-photo scan. The result offers two choices: log the leftovers
+// as their own entry, or deduct them from the meal just logged — as a visible second "Leftovers
+// removed" line (Josh's call), not a silent edit to the original entry, so the log still reads
+// "logged X, then removed Y" instead of quietly rewriting the original numbers.
+let lastLeftoverB64=null,lastLeftoverType=null,currentLeftoverMeal=null;
+function handleLeftoverPhoto(event){
+  const file=event.target.files[0];if(!file)return;
+  const preview=document.getElementById('lo-preview'),img=document.getElementById('lo-img'),loading=document.getElementById('lo-loading'),result=document.getElementById('lo-result');
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    img.src=e.target.result;preview.classList.remove('hidden');loading.classList.remove('hidden');result.innerHTML='';
+    lastLeftoverB64=e.target.result.split(',')[1];lastLeftoverType=file.type;currentLeftoverMeal=null;
+    const prompt='Analyse this photo of LEFTOVER food remaining on a plate — estimate the macros of only what is still visible/uneaten, not a full serving. Cooked weight assumed. Return ONLY valid JSON: {"name":"short description of the leftover food","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}';
+    try{
+      const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-6',max_tokens:400,
+          messages:[{role:'user',content:[
+            {type:'image',source:{type:'base64',media_type:lastLeftoverType,data:lastLeftoverB64}},
+            {type:'text',text:prompt}
+          ]}]
+        })
+      });
+      const data=await resp.json();
+      if(data.error){throw new Error(data.error.message);}
+      const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+      const clean=text.replace(/```json\n?|```/g,'').trim();
+      const meal=JSON.parse(clean);
+      meal.cal=+meal.cal||0;meal.pro=+meal.pro||0;meal.fat=+meal.fat||0;meal.carb=+meal.carb||0;meal.fib=+meal.fib||0;
+      currentLeftoverMeal=meal;
+      loading.classList.add('hidden');
+      renderLeftoverResult(meal);
+    }catch(err){
+      loading.classList.add('hidden');
+      result.innerHTML=`<div style="color:var(--muted);font-size:13px;padding:8px 0">Couldn't analyse this photo. Try again with better light, or skip leftovers tracking for this meal.
+        <div style="margin-top:8px"><button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('lo-preview').classList.add('hidden')">Cancel</button></div>
+      </div>`;
+    }
+  };
+  reader.readAsDataURL(file);event.target.value='';
+}
+// Picks the most recently logged real meal for the date being viewed — the thing a leftovers photo
+// almost always belongs to. Deduction entries are excluded so "deduct from last meal" can never
+// target an earlier deduction line.
+function lastLoggableMealForDate(dateStr){
+  const meals=mealsForDate(dateStr).filter(m=>!m.isDeduction);
+  if(!meals.length)return null;
+  return meals.reduce((a,b)=>(b.updatedAt||0)>(a.updatedAt||0)?b:a);
+}
+function renderLeftoverResult(meal){
+  const result=document.getElementById('lo-result');
+  const target=lastLoggableMealForDate(viewDateStr());
+  result.innerHTML=`<div style="padding:8px 0">
+    <div class="form-group"><div class="input-label">Food (edit if the AI got it wrong)</div><input class="input-field" id="lo-name" value="${phEsc(meal.name)}"></div>
+    <div class="macro-fields has-fiber" id="lo-macro-fields">
+      <div class="macro-field-wrap"><div class="input-label">Cal</div><input class="input-field" id="lo-cal" type="number" value="${meal.cal}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Protein g</div><input class="input-field" id="lo-pro" type="number" value="${meal.pro}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Fat g</div><input class="input-field" id="lo-fat" type="number" value="${meal.fat}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="lo-carb" type="number" value="${meal.carb}"></div>
+      <div class="macro-field-wrap"><div class="input-label">Fiber g</div><input class="input-field" id="lo-fib" type="number" value="${meal.fib}"></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${phEsc(meal.note||'')}</div>
+    ${target?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Deducting will subtract from: <strong>${phEsc(target.name)}</strong>${target.time?' ('+target.time+')':''}</div>`:`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">No meal logged yet today to deduct from — you can still log the leftovers as their own entry.</div>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" style="width:auto" onclick="logLeftoversSeparately()">➕ Log separately</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" ${target?'':'disabled'} onclick="deductLeftoversFromLastMeal()">➖ Deduct from last meal</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('lo-preview').classList.add('hidden')">Cancel</button>
+    </div>
+  </div>`;
+}
+function getLeftoverFieldsAsMeal(){
+  return {
+    name:document.getElementById('lo-name').value,
+    cal:document.getElementById('lo-cal').value,
+    pro:document.getElementById('lo-pro').value,
+    fat:document.getElementById('lo-fat').value,
+    carb:document.getElementById('lo-carb').value,
+    fib:document.getElementById('lo-fib').value,
+    emoji:(currentLeftoverMeal&&currentLeftoverMeal.emoji)||'🍽️'
+  };
+}
+function logLeftoversSeparately(){
+  addMeal(getLeftoverFieldsAsMeal());
+  document.getElementById('lo-preview').classList.add('hidden');
+}
+function deductLeftoversFromLastMeal(){
+  const target=lastLoggableMealForDate(viewDateStr());
+  if(!target)return;
+  const vals=getLeftoverFieldsAsMeal();
+  // Clamp the deduction's magnitude to the target meal's own values, so subtracting can never push
+  // the day's totals negative — if the AI overestimates the leftover, it just zeroes that meal out.
+  const clamp=(v,max)=>Math.min(Math.abs(+v||0),Math.abs(+max||0));
+  const dedCal=clamp(vals.cal,target.cal),dedPro=clamp(vals.pro,target.pro),dedFat=clamp(vals.fat,target.fat),dedCarb=clamp(vals.carb,target.carb),dedFib=clamp(vals.fib,target.fib);
+  addMeal({
+    name:'Leftovers removed — '+(vals.name||'from plate'),
+    cal:-dedCal,pro:-dedPro,fat:-dedFat,carb:-dedCarb,fib:-dedFib,
+    emoji:'➖',
+    isDeduction:true,
+    deductedFrom:target.id
+  });
+  document.getElementById('lo-preview').classList.add('hidden');
 }
 
 // ─── WEIGHT ───────────────────────────────────────────────────────────────────
