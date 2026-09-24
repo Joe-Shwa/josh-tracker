@@ -800,6 +800,29 @@ function dedupeWeightsByDate(){
   }
   return false;
 }
+// Collapse duplicate Quick Add items with the same name — old bug: the seed's ids were re-minted
+// randomly every time S.quickFoods got (re-)seeded (e.g. a cleared local session before Drive sync
+// caught up), so a Drive merge (id-keyed, blind to name) kept stacking "new" copies of the same 8
+// staples. Seed items now carry fixed ids so this shouldn't recur, but this cleans up whatever
+// duplicates already exist. Keeps one entry per name — prefers a custom (user-edited) copy over a
+// plain seed copy if both exist. Must run on ANY change to S.quickFoods, not just at startup — the
+// corruption re-appears after a Drive merge if this only runs once.
+function dedupeQuickFoodsByName(){
+  const byName=new Map();
+  (S.quickFoods||[]).forEach(f=>{
+    const key=(f.n||'').trim().toLowerCase();
+    if(!key)return;
+    const cur=byName.get(key);
+    if(!cur || (f.custom && !cur.custom) || (f.custom===cur.custom && (f.updatedAt||0)>(cur.updatedAt||0))){
+      byName.set(key,f);
+    }
+  });
+  if(byName.size < (S.quickFoods||[]).length){
+    S.quickFoods=[...byName.values()];
+    return true;
+  }
+  return false;
+}
 // Backfill id/updatedAt onto any entries created before this update, so old data keeps working.
 function migrateArr(arr,prefix,dateField){
   (arr||[]).forEach(e=>{
@@ -885,8 +908,10 @@ function migrateState(){
 
   // Quick Add — migrate the old fixed QUICK_FOODS array into personalisable, id-based S.quickFoods
   if(!S.quickFoods){
-    S.quickFoods=QUICK_FOODS_SEED.map(f=>({...f,id:newId('qf'),custom:false}));
+    S.quickFoods=QUICK_FOODS_SEED.map(f=>({...f,custom:false,updatedAt:Date.now()}));
   }
+  S.quickFoods.forEach(f=>{if(!f.id)f.id=newId('qf');if(!f.updatedAt)f.updatedAt=Date.now();});
+  dedupeQuickFoodsByName(); // clean up duplicates from the old bug where seed ids were re-minted randomly on every reseed
 
   // Fasting state — off by default only for a fresh install with no prior data; Josh asked for this explicitly
   if(!S.fasting){
@@ -953,14 +978,14 @@ const PEPTIDES_SEED = [
 // Renamed from QUICK_FOODS: this is now only the seed used the first time S.quickFoods is created.
 // Runtime code reads/writes S.quickFoods so items can be added and removed.
 const QUICK_FOODS_SEED = [
-  {n:"Steak 180g",i:"🥩",c:320,p:43,f:16,cb:0,fib:0},
-  {n:"Boiled Egg",i:"🥚",c:70,p:6,f:5,cb:0,fib:0,qty:true},
-  {n:"Chicken Breast",i:"🍗",c:350,p:65,f:8,cb:0,fib:0,a:"2 pieces ~300g"},
-  {n:"Greek Yoghurt",i:"🥛",c:150,p:17,f:5,cb:8,fib:0,a:"170g"},
-  {n:"Flat White",i:"☕",c:90,p:4,f:3,cb:10,fib:0,a:"double shot"},
-  {n:"Whey Protein",i:"🥤",c:127,p:23,f:2,cb:3,fib:0,a:"1 scoop ~34g"},
-  {n:"Bone Broth",i:"🍵",c:10,p:8,f:0,cb:1,fib:0},
-  {n:"Tuna Tin",i:"🐟",c:120,p:28,f:1,cb:0,fib:0,a:"95g tin"},
+  {id:"qf_seed_steak",n:"Steak 180g",i:"🥩",c:320,p:43,f:16,cb:0,fib:0},
+  {id:"qf_seed_egg",n:"Boiled Egg",i:"🥚",c:70,p:6,f:5,cb:0,fib:0,qty:true},
+  {id:"qf_seed_chicken",n:"Chicken Breast",i:"🍗",c:350,p:65,f:8,cb:0,fib:0,a:"2 pieces ~300g"},
+  {id:"qf_seed_yoghurt",n:"Greek Yoghurt",i:"🥛",c:150,p:17,f:5,cb:8,fib:0,a:"170g"},
+  {id:"qf_seed_flatwhite",n:"Flat White",i:"☕",c:90,p:4,f:3,cb:10,fib:0,a:"double shot"},
+  {id:"qf_seed_whey",n:"Whey Protein",i:"🥤",c:127,p:23,f:2,cb:3,fib:0,a:"1 scoop ~34g"},
+  {id:"qf_seed_broth",n:"Bone Broth",i:"🍵",c:10,p:8,f:0,cb:1,fib:0},
+  {id:"qf_seed_tuna",n:"Tuna Tin",i:"🐟",c:120,p:28,f:1,cb:0,fib:0,a:"95g tin"},
 ];
 
 const SUPPS = [
@@ -2912,6 +2937,7 @@ async function loadFromDrive(){
         S.water = mergeById(S.water, driveData.water, 'water').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
         S.movement = mergeById(S.movement, driveData.movement, 'movement');
         S.quickFoods = mergeById(S.quickFoods, driveData.quickFoods, 'quickfood');
+        dedupeQuickFoodsByName(); // clean up any same-name duplicates the Drive merge just re-introduced
         S.measurements = mergeById(S.measurements, driveData.measurements, 'measurement').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
         if(driveData.fasting){
           if(!S.fasting)S.fasting={windowEnabled:false,windowHours:6,windowStart:'12:00',current:null,log:[]};
