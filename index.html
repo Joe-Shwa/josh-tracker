@@ -421,7 +421,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <!-- PHOTO LOG -->
   <div class="card">
     <div class="card-title">📸 Photo Log</div>
-    <div class="info-box blue" style="margin-top:-4px">Best for single items or simple plates in good light. Complex multi-item plates — use text lookup instead.</div>
+    <div class="info-box blue" style="margin-top:-4px">Best for single items or simple plates in good light. Complex multi-item plates — use text lookup instead. Leftover on a plate? Snap it here too, then tap 🥡 Leftovers on the result to log it separately or deduct it from your last meal.</div>
 
     <input type="file" id="ph-camera" accept="image/*" capture="environment" class="hidden" onchange="handleMealPhoto(event)">
     <input type="file" id="ph-gallery" accept="image/*" class="hidden" onchange="handleMealPhoto(event)">
@@ -433,24 +433,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <img id="ph-img" style="width:100%;border-radius:10px;max-height:180px;object-fit:cover;margin-bottom:10px">
       <div id="ph-loading" class="hidden" style="text-align:center;padding:14px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing...</div></div>
       <div id="ph-result"></div>
-    </div>
-  </div>
-
-  <!-- LEFTOVERS -->
-  <div class="card">
-    <div class="card-title">🍽️ Log Leftovers</div>
-    <div class="info-box blue" style="margin-top:-4px">Didn't finish a plate? Photograph what's left, then either log it as its own entry or deduct it from the meal you just logged.</div>
-
-    <input type="file" id="lo-camera" accept="image/*" capture="environment" class="hidden" onchange="handleLeftoverPhoto(event)">
-    <input type="file" id="lo-gallery" accept="image/*" class="hidden" onchange="handleLeftoverPhoto(event)">
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <button class="btn btn-primary" style="flex:1" onclick="document.getElementById('lo-camera').click()">📷 Take Photo</button>
-      <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('lo-gallery').click()">🖼️ From Gallery</button>
-    </div>
-    <div id="lo-preview" class="hidden">
-      <img id="lo-img" style="width:100%;border-radius:10px;max-height:180px;object-fit:cover;margin-bottom:10px">
-      <div id="lo-loading" class="hidden" style="text-align:center;padding:14px"><div class="dots"><span></span><span></span><span></span></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Analysing...</div></div>
-      <div id="lo-result"></div>
     </div>
   </div>
 
@@ -1636,13 +1618,46 @@ function renderPhotoResult(meal){
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${phEsc(meal.note||'')}</div>
     <div id="ph-rescan-error" style="font-size:12px;color:#EF4444;margin-bottom:6px"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div id="ph-action-row" style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" style="width:auto" onclick="logPhotoMealFromFields()">Add to today ✓</button>
       <button class="btn btn-secondary btn-sm" style="width:auto" onclick="saveAsQuickFood(getPhotoFieldsAsMeal())">⭐ Quick Add</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="showLeftoverOptions()">🥡 Leftovers</button>
       <button class="btn btn-secondary btn-sm" style="width:auto" onclick="rescanMealPhoto()">🔄 Re-scan</button>
       <button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('ph-preview').classList.add('hidden')">Cancel</button>
     </div>
+    <div id="ph-leftover-row" class="hidden" style="margin-top:4px">
+      <div id="ph-leftover-note" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" style="width:auto" onclick="logLeftoversSeparately()">➕ Log separately</button>
+        <button class="btn btn-secondary btn-sm" id="ph-deduct-btn" style="width:auto" onclick="deductLeftoversFromLastMeal()">➖ Deduct from last meal</button>
+        <button class="btn btn-secondary btn-sm" style="width:auto" onclick="hideLeftoverOptions()">‹ Back</button>
+      </div>
+    </div>
   </div>`;
+}
+// Switches the photo-result view from the normal meal actions to the leftovers choice — used when
+// this was actually food left on a plate rather than a new meal (see showLeftoverOptions below).
+function hideLeftoverOptions(){
+  document.getElementById('ph-leftover-row').classList.add('hidden');
+  document.getElementById('ph-action-row').classList.remove('hidden');
+}
+// Shows the "log separately vs deduct from last meal" choice for the currently-analysed photo —
+// reached by tapping 🥡 Leftovers on a normal Photo Log result, once you notice this was actually
+// leftovers rather than a new meal. Reuses the same photo/macro estimate already on screen instead
+// of running a second AI analysis pass.
+function showLeftoverOptions(){
+  const target=lastLoggableMealForDate(viewDateStr());
+  const note=document.getElementById('ph-leftover-note');
+  const deductBtn=document.getElementById('ph-deduct-btn');
+  if(target){
+    note.innerHTML='Deducting will subtract from: <strong>'+phEsc(target.name)+'</strong>'+(target.time?' ('+target.time+')':'');
+    deductBtn.disabled=false;
+  } else {
+    note.textContent='No meal logged yet today to deduct from — you can still log this as its own leftovers entry.';
+    deductBtn.disabled=true;
+  }
+  document.getElementById('ph-action-row').classList.add('hidden');
+  document.getElementById('ph-leftover-row').classList.remove('hidden');
 }
 function getPhotoFieldsAsMeal(){
   return {
@@ -1671,51 +1686,15 @@ async function rescanMealPhoto(){
 }
 
 // ─── LEFTOVERS ──────────────────────────────────────────────────────────────
-// Photograph what's left on the plate after a meal. Reuses the same Worker/photo-analysis call
-// as the main Photo Log, but keeps its own state (lastLeftoverB64 etc.) so a leftovers scan can
-// never clobber an in-progress meal-photo scan. The result offers two choices: log the leftovers
-// as their own entry, or deduct them from the meal just logged — as a visible second "Leftovers
-// removed" line (Josh's call), not a silent edit to the original entry, so the log still reads
-// "logged X, then removed Y" instead of quietly rewriting the original numbers.
-let lastLeftoverB64=null,lastLeftoverType=null,currentLeftoverMeal=null;
-function handleLeftoverPhoto(event){
-  const file=event.target.files[0];if(!file)return;
-  const preview=document.getElementById('lo-preview'),img=document.getElementById('lo-img'),loading=document.getElementById('lo-loading'),result=document.getElementById('lo-result');
-  const reader=new FileReader();
-  reader.onload=async e=>{
-    img.src=e.target.result;preview.classList.remove('hidden');loading.classList.remove('hidden');result.innerHTML='';
-    lastLeftoverB64=e.target.result.split(',')[1];lastLeftoverType=file.type;currentLeftoverMeal=null;
-    const prompt='Analyse this photo of LEFTOVER food remaining on a plate — estimate the macros of only what is still visible/uneaten, not a full serving. Cooked weight assumed. Return ONLY valid JSON: {"name":"short description of the leftover food","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}';
-    try{
-      const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},
-        body:JSON.stringify({
-          model:'claude-sonnet-4-6',max_tokens:400,
-          messages:[{role:'user',content:[
-            {type:'image',source:{type:'base64',media_type:lastLeftoverType,data:lastLeftoverB64}},
-            {type:'text',text:prompt}
-          ]}]
-        })
-      });
-      const data=await resp.json();
-      if(data.error){throw new Error(data.error.message);}
-      const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
-      const clean=text.replace(/```json\n?|```/g,'').trim();
-      const meal=JSON.parse(clean);
-      meal.cal=+meal.cal||0;meal.pro=+meal.pro||0;meal.fat=+meal.fat||0;meal.carb=+meal.carb||0;meal.fib=+meal.fib||0;
-      currentLeftoverMeal=meal;
-      loading.classList.add('hidden');
-      renderLeftoverResult(meal);
-    }catch(err){
-      loading.classList.add('hidden');
-      result.innerHTML=`<div style="color:var(--muted);font-size:13px;padding:8px 0">Couldn't analyse this photo. Try again with better light, or skip leftovers tracking for this meal.
-        <div style="margin-top:8px"><button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('lo-preview').classList.add('hidden')">Cancel</button></div>
-      </div>`;
-    }
-  };
-  reader.readAsDataURL(file);event.target.value='';
-}
+// Rolled into the Photo Log above — there used to be a second, separate camera/gallery card just
+// for leftovers, but the two "Take Photo" buttons sitting right on top of each other kept getting
+// tapped by accident. Now there's one photo button, and the leftovers path starts from the normal
+// Photo Log result: tap 🥡 Leftovers (see showLeftoverOptions() above) to get the log-separately /
+// deduct-from-last-meal choice below, using the macro estimate already on screen — no second AI
+// analysis pass, so no second camera button to mis-tap. The deduction still shows up as a visible
+// second "Leftovers removed" line (Josh's call), not a silent edit to the original entry, so the
+// log still reads "logged X, then removed Y" instead of quietly rewriting the original numbers.
+
 // Picks the most recently logged real meal for the date being viewed — the thing a leftovers photo
 // almost always belongs to. Deduction entries are excluded so "deduct from last meal" can never
 // target an earlier deduction line.
@@ -1724,48 +1703,16 @@ function lastLoggableMealForDate(dateStr){
   if(!meals.length)return null;
   return meals.reduce((a,b)=>(b.updatedAt||0)>(a.updatedAt||0)?b:a);
 }
-function renderLeftoverResult(meal){
-  const result=document.getElementById('lo-result');
-  const target=lastLoggableMealForDate(viewDateStr());
-  result.innerHTML=`<div style="padding:8px 0">
-    <div class="form-group"><div class="input-label">Food (edit if the AI got it wrong)</div><input class="input-field" id="lo-name" value="${phEsc(meal.name)}"></div>
-    <div class="macro-fields has-fiber" id="lo-macro-fields">
-      <div class="macro-field-wrap"><div class="input-label">Cal</div><input class="input-field" id="lo-cal" type="number" value="${meal.cal}"></div>
-      <div class="macro-field-wrap"><div class="input-label">Protein g</div><input class="input-field" id="lo-pro" type="number" value="${meal.pro}"></div>
-      <div class="macro-field-wrap"><div class="input-label">Fat g</div><input class="input-field" id="lo-fat" type="number" value="${meal.fat}"></div>
-      <div class="macro-field-wrap"><div class="input-label">Carbs g</div><input class="input-field" id="lo-carb" type="number" value="${meal.carb}"></div>
-      <div class="macro-field-wrap"><div class="input-label">Fiber g</div><input class="input-field" id="lo-fib" type="number" value="${meal.fib}"></div>
-    </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${phEsc(meal.note||'')}</div>
-    ${target?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Deducting will subtract from: <strong>${phEsc(target.name)}</strong>${target.time?' ('+target.time+')':''}</div>`:`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">No meal logged yet today to deduct from — you can still log the leftovers as their own entry.</div>`}
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary btn-sm" style="width:auto" onclick="logLeftoversSeparately()">➕ Log separately</button>
-      <button class="btn btn-secondary btn-sm" style="width:auto" ${target?'':'disabled'} onclick="deductLeftoversFromLastMeal()">➖ Deduct from last meal</button>
-      <button class="btn btn-secondary btn-sm" style="width:auto" onclick="document.getElementById('lo-preview').classList.add('hidden')">Cancel</button>
-    </div>
-  </div>`;
-}
-function getLeftoverFieldsAsMeal(){
-  return {
-    name:document.getElementById('lo-name').value,
-    cal:document.getElementById('lo-cal').value,
-    pro:document.getElementById('lo-pro').value,
-    fat:document.getElementById('lo-fat').value,
-    carb:document.getElementById('lo-carb').value,
-    fib:document.getElementById('lo-fib').value,
-    emoji:(currentLeftoverMeal&&currentLeftoverMeal.emoji)||'🍽️'
-  };
-}
 function logLeftoversSeparately(){
-  addMeal(getLeftoverFieldsAsMeal());
-  document.getElementById('lo-preview').classList.add('hidden');
+  addMeal(getPhotoFieldsAsMeal());
+  document.getElementById('ph-preview').classList.add('hidden');
 }
 function deductLeftoversFromLastMeal(){
   const target=lastLoggableMealForDate(viewDateStr());
   if(!target)return;
-  const vals=getLeftoverFieldsAsMeal();
+  const vals=getPhotoFieldsAsMeal();
   // Clamp the deduction's magnitude to the target meal's own values, so subtracting can never push
-  // the day's totals negative — if the AI overestimates the leftover, it just zeroes that meal out.
+  // the day's totals negative — if the estimate overshoots, it just zeroes that meal out.
   const clamp=(v,max)=>Math.min(Math.abs(+v||0),Math.abs(+max||0));
   const dedCal=clamp(vals.cal,target.cal),dedPro=clamp(vals.pro,target.pro),dedFat=clamp(vals.fat,target.fat),dedCarb=clamp(vals.carb,target.carb),dedFib=clamp(vals.fib,target.fib);
   addMeal({
@@ -1775,7 +1722,7 @@ function deductLeftoversFromLastMeal(){
     isDeduction:true,
     deductedFrom:target.id
   });
-  document.getElementById('lo-preview').classList.add('hidden');
+  document.getElementById('ph-preview').classList.add('hidden');
 }
 
 // ─── WEIGHT ───────────────────────────────────────────────────────────────────
