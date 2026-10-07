@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Josh's Tracker</title>
 <link rel="icon" type="image/png" sizes="192x192" href="josh-tracker-icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="josh-tracker-icon-512.png">
@@ -269,6 +269,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <option value="recreational">Recreational gym-goer / staying fit</option>
         <option value="athlete">Competitive athlete / bodybuilder</option>
       </select>
+    </div>
+
+    <div class="settings-section-title">Weight Goals</div>
+    <div class="settings-hint">Baseline is your original weigh-in — used for "since baseline" and progress. Goal is the weight your calorie/protein targets are calculated for.</div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Baseline (kg)</div><input class="input-field" id="pf-baseline" type="number" step="0.1"></div>
+      <div style="flex:1"><div class="input-label">Goal (kg)</div><input class="input-field" id="pf-goal" type="number" step="0.1"></div>
     </div>
 
     <div class="settings-section-title">Dietitian / Custom Targets</div>
@@ -1155,7 +1162,7 @@ function renderSettingsPanel(){
   const nutList=document.getElementById('settings-nutrients-list');
   nutList.innerHTML=NUTRIENT_TOGGLES.map(n=>`<div class="pill-row"><div class="pill-name">${n.label}</div><div class="pill-check ${S.settings.nutrients[n.id]?'done':''}" onclick="toggleNutrientSetting('${n.id}')">${S.settings.nutrients[n.id]?'✓':''}</div></div>`).join('');
 }
-// Fills the Training Level select + override inputs from the current profile whenever Settings opens.
+// Fills the Training Level select + override inputs + weight-goal fields from the current profile whenever Settings opens.
 function populateProfileSettings(){
   if(!S.profile)return;
   const sel=document.getElementById('pf-training');
@@ -1166,9 +1173,11 @@ function populateProfileSettings(){
   setVal('pf-ov-protein',ov.protein);
   setVal('pf-ov-fat',ov.fat);
   setVal('pf-ov-carb',ov.carbs);
+  setVal('pf-baseline',S.profile.current);
+  setVal('pf-goal',S.profile.goal);
 }
-// Reads Training Level + override fields back out, recomputes final macros, and persists them onto
-// S.profile — called whenever Settings closes so Today reflects the change immediately.
+// Reads Training Level + override fields + weight-goal fields back out, recomputes final macros, and
+// persists them onto S.profile — called whenever Settings closes so Today/Weight/Ask reflect the change immediately.
 function saveProfileSettings(){
   if(!S.profile)return;
   const sel=document.getElementById('pf-training');
@@ -1180,6 +1189,11 @@ function saveProfileSettings(){
     fat:readOv('pf-ov-fat'),
     carbs:readOv('pf-ov-carb')
   };
+  // Baseline/Goal — blank keeps whatever's already stored rather than wiping it to 0.
+  const baselineEl=document.getElementById('pf-baseline');
+  if(baselineEl && baselineEl.value!=='') S.profile.current=+baselineEl.value;
+  const goalEl=document.getElementById('pf-goal');
+  if(goalEl && goalEl.value!=='') S.profile.goal=+goalEl.value;
   const final=computeFinalMacros(S.profile,S.profile.overrides);
   S.profile.cals=final.cals;
   S.profile.protein=final.protein;
@@ -2439,7 +2453,12 @@ function buildSys(){
   const cautionLines=(S.peptides||[]).flatMap(pep=>(pep.cautions||[]).map(c=>pep.name+': '+c)).join(' | ');
   const suppLines=(S.supplements||[]).map(s=>`${s.name} (${s.dose})`).join(', ');
   const fastingLine=S.fasting&&S.fasting.windowEnabled?`Daily eating window: ${S.fasting.windowHours}h starting ${S.fasting.windowStart}.`:'';
-  return `You are Josh's personal health assistant. Josh: 47yo male, FIFO tunnelling worker (2wks on/1wk off, rotating days/nights), 184cm, current ~${S.weights.length?S.weights[S.weights.length-1].weight:103.8}kg, baseline 106kg, goal 90-95kg.
+  // Baseline/goal are read live from S.profile rather than hardcoded, so a correction made in
+  // Settings (Weight Goals section) is reflected here immediately instead of staying stuck on
+  // whatever was typed in at initial setup.
+  const baselineWeight=p?.current??106;
+  const goalWeight=p?.goal??92;
+  return `You are Josh's personal health assistant. Josh: 47yo male, FIFO tunnelling worker (2wks on/1wk off, rotating days/nights), 184cm, current ~${S.weights.length?S.weights[S.weights.length-1].weight:103.8}kg, baseline ${baselineWeight}kg, goal ${goalWeight}kg.
 
 Active peptides: ${peptideLines||'none'}.
 Peptide cautions to keep in mind: ${cautionLines||'none noted'}.
@@ -2468,8 +2487,12 @@ function buildDataSummary(){
     days.push(`${i===0?'Today':ds}: ${Math.round(t.cal)} cal, ${Math.round(t.pro)}g pro, ${Math.round(t.fat)}g fat, ${Math.round(t.carb)}g carb, ${w}ml water${mv?`, ${mv.steps} steps/${mv.calBurned} cal burned`:''}${sl?`, sleep ${sl.total}h (${sl.deep}m deep/${sl.rem}m REM)`:''}${wt?`, weighed ${wt.weight}kg`:''}`);
   }
   const weightLines=[...S.weights].slice(-5).map(w=>`${w.date}: ${w.weight}kg`).join('; ');
+  // Measurements weren't surfaced to the Ask assistant at all before this — it could see weight
+  // trends but not tape-measure progress, so a question like "how's my waist doing" had nothing to
+  // go on. Same pattern as weightLines: last 5 entries, most relevant fields only via fmtMeasureEntry.
+  const measurementLines=[...(S.measurements||[])].slice(-5).map(m=>`${m.date}: ${fmtMeasureEntry(m)}${m.notes?' ('+m.notes+')':''}`).join('; ');
   const todayMeals=mealsForDate(S.today.date).map(m=>`${m.time||''} ${m.emoji||''} ${m.name} (${m.cal}cal/${m.pro}g pro/${m.fat}g fat/${m.carb}g carb)`).join('; ')||'none logged yet';
-  return `Last 7 days:\n${days.join('\n')}\n\nRecent weight entries: ${weightLines||'none'}\nCurrent streak: ${S.streak?.count||0} days (longest: ${S.streak?.longest||0})\n\nToday's meals in full: ${todayMeals}`;
+  return `Last 7 days:\n${days.join('\n')}\n\nRecent weight entries: ${weightLines||'none'}\nRecent body measurements: ${measurementLines||'none logged'}\nCurrent streak: ${S.streak?.count||0} days (longest: ${S.streak?.longest||0})\n\nToday's meals in full: ${todayMeals}`;
 }
 
 // Instructs the model on how to write back to the tracker via chat, and defines the exact
