@@ -261,8 +261,32 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div class="settings-hint">Calories and Protein always track — your streak depends on them.</div>
     <div id="settings-nutrients-list"></div>
 
+    <div class="settings-section-title">Your Profile</div>
+    <div class="settings-hint">Calories are calculated from these via the Mifflin-St Jeor formula — the same validated method used for the other trackers — instead of the old flat "goal weight × 26" rule of thumb.</div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Sex</div>
+        <select class="input-field" id="pf-sex">
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </div>
+      <div style="flex:1"><div class="input-label">Age</div><input class="input-field" id="pf-age" type="number"></div>
+    </div>
+    <div class="input-row">
+      <div style="flex:1"><div class="input-label">Height (cm)</div><input class="input-field" id="pf-height" type="number"></div>
+      <div style="flex:1"><div class="input-label">Activity</div>
+        <select class="input-field" id="pf-activity">
+          <option value="sedentary">Sedentary — desk job, little exercise</option>
+          <option value="light">Light — exercise 1-3 days/week</option>
+          <option value="moderate">Moderate — exercise 3-5 days/week</option>
+          <option value="active">Active — exercise 6-7 days/week</option>
+          <option value="very_active">Very active — physical job or 2x/day training</option>
+        </select>
+      </div>
+    </div>
+
     <div class="settings-section-title">Training Level</div>
-    <div class="settings-hint">Sets how aggressively your protein target scales — everything else (calories, fat, carbs) follows from that.</div>
+    <div class="settings-hint">Sets your protein target (grams per kg of current bodyweight) based on how hard you train and whether your goal weight is below, at, or above your current weight.</div>
     <div class="form-group">
       <select class="input-field" id="pf-training">
         <option value="general">General health / not training specifically</option>
@@ -928,6 +952,27 @@ function migrateState(){
       ['cals','protein','fat','carbs'].forEach(k=>{ if(!(k in S.profile.overrides)) S.profile.overrides[k]=null; });
     }
   }
+
+  // Mifflin-St Jeor port — backfill Sex/Age/Height/Activity for any profile saved before these
+  // existed (defaults match what finishSetup() already assumed for Josh, so this is a no-op for
+  // him), then recompute macros once so the new formula takes effect immediately rather than
+  // waiting for the next Settings save. Dietitian overrides still win, same as always.
+  if(S.profile){
+    if(!S.profile.sex)S.profile.sex='male';
+    if(!S.profile.age)S.profile.age=47;
+    if(!S.profile.height)S.profile.height=184;
+    if(!S.profile.activity)S.profile.activity='active';
+    if(!S.profile._mifflinMigrated){
+      const p={sex:S.profile.sex,age:S.profile.age,height:S.profile.height,weight:latestWeightKg(),goal:S.profile.goal,activity:S.profile.activity,trainingLevel:S.profile.trainingLevel};
+      const final=computeFinalMacros(p,S.profile.overrides);
+      S.profile.cals=final.cals;
+      S.profile.protein=final.protein;
+      S.profile.fat=final.fat;
+      S.profile.carbs=final.carbs;
+      S.profile.water=final.water;
+      S.profile._mifflinMigrated=true;
+    }
+  }
 }
 
 const RETA_START = new Date('2026-08-02');
@@ -997,13 +1042,17 @@ const MEASURE_FIELDS = [
   {key:'calf', label:'Calf', unit:'cm', single:false, tip:'Widest point, standing normally.'},
 ];
 
-// ─── TRAINING LEVEL: scales protein aggressiveness off the same static formula Josh already had.
-// 'recreational' (mult:1.0) is the default and exactly reproduces the pre-existing goal*2 protein
-// calc — nothing changes for anyone who never touches this setting.
+// ─── ACTIVITY LEVEL + TRAINING LEVEL ───────────────────────────────────────────
+// Activity multiplier feeds the Mifflin-St Jeor TDEE calc below (same table the generic/Lauren/
+// trial trackers use). TRAINING_LEVELS now mirrors their proteinPerKg table too — protein scales
+// off CURRENT bodyweight by how hard you train and whether you're losing/maintaining/building,
+// instead of the old flat goal*2*mult rule of thumb.
+const ACTIVITY_MULT = {sedentary:1.2, light:1.375, moderate:1.55, active:1.725, very_active:1.9};
+const ACTIVITY_LABEL = {sedentary:'sedentary', light:'lightly active', moderate:'moderately active', active:'active', very_active:'very active'};
 const TRAINING_LEVELS = {
-  general:      {label:'General health / not training specifically', mult:0.85},
-  recreational: {label:'Recreational gym-goer / staying fit',         mult:1.0},
-  athlete:      {label:'Competitive athlete / bodybuilder',           mult:1.25}
+  general:      {label:'General health / not training specifically', proteinPerKg:{lose:1.8, maintain:1.2, build:1.6}},
+  recreational: {label:'Recreational gym-goer / staying fit',         proteinPerKg:{lose:2.2, maintain:1.6, build:2.0}},
+  athlete:      {label:'Competitive athlete / bodybuilder',           proteinPerKg:{lose:2.6, maintain:2.0, build:2.4}}
 };
 
 // ─── DATA EXPORT ────────────────────────────────────────────────────────────
@@ -1162,13 +1211,20 @@ function renderSettingsPanel(){
   const nutList=document.getElementById('settings-nutrients-list');
   nutList.innerHTML=NUTRIENT_TOGGLES.map(n=>`<div class="pill-row"><div class="pill-name">${n.label}</div><div class="pill-check ${S.settings.nutrients[n.id]?'done':''}" onclick="toggleNutrientSetting('${n.id}')">${S.settings.nutrients[n.id]?'✓':''}</div></div>`).join('');
 }
-// Fills the Training Level select + override inputs + weight-goal fields from the current profile whenever Settings opens.
+// Fills the Sex/Age/Height/Activity + Training Level select + override inputs + weight-goal
+// fields from the current profile whenever Settings opens.
 function populateProfileSettings(){
   if(!S.profile)return;
+  const sexSel=document.getElementById('pf-sex');
+  if(sexSel)sexSel.value=S.profile.sex||'male';
+  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=(v===null||v===undefined)?'':v;};
+  setVal('pf-age',S.profile.age);
+  setVal('pf-height',S.profile.height);
+  const activitySel=document.getElementById('pf-activity');
+  if(activitySel)activitySel.value=S.profile.activity||'active';
   const sel=document.getElementById('pf-training');
   if(sel)sel.value=S.profile.trainingLevel||'recreational';
   const ov=S.profile.overrides||{};
-  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=(v===null||v===undefined)?'':v;};
   setVal('pf-ov-cals',ov.cals);
   setVal('pf-ov-protein',ov.protein);
   setVal('pf-ov-fat',ov.fat);
@@ -1176,10 +1232,19 @@ function populateProfileSettings(){
   setVal('pf-baseline',S.profile.current);
   setVal('pf-goal',S.profile.goal);
 }
-// Reads Training Level + override fields + weight-goal fields back out, recomputes final macros, and
-// persists them onto S.profile — called whenever Settings closes so Today/Weight/Ask reflect the change immediately.
+// Reads Sex/Age/Height/Activity + Training Level + override fields + weight-goal fields back out,
+// recomputes final macros via Mifflin-St Jeor using your latest weigh-in, and persists them onto
+// S.profile — called whenever Settings closes so Today/Weight/Ask reflect the change immediately.
 function saveProfileSettings(){
   if(!S.profile)return;
+  const sexSel=document.getElementById('pf-sex');
+  if(sexSel)S.profile.sex=sexSel.value||'male';
+  const ageEl=document.getElementById('pf-age');
+  if(ageEl && ageEl.value!=='') S.profile.age=+ageEl.value;
+  const heightEl=document.getElementById('pf-height');
+  if(heightEl && heightEl.value!=='') S.profile.height=+heightEl.value;
+  const activitySel=document.getElementById('pf-activity');
+  if(activitySel)S.profile.activity=activitySel.value||'active';
   const sel=document.getElementById('pf-training');
   if(sel)S.profile.trainingLevel=sel.value||'recreational';
   const readOv=(id)=>{const el=document.getElementById(id);if(!el)return null;const v=el.value;return (v===''||v===null)?null:+v;};
@@ -1194,11 +1259,13 @@ function saveProfileSettings(){
   if(baselineEl && baselineEl.value!=='') S.profile.current=+baselineEl.value;
   const goalEl=document.getElementById('pf-goal');
   if(goalEl && goalEl.value!=='') S.profile.goal=+goalEl.value;
-  const final=computeFinalMacros(S.profile,S.profile.overrides);
+  const p={sex:S.profile.sex,age:S.profile.age,height:S.profile.height,weight:latestWeightKg(),goal:S.profile.goal,activity:S.profile.activity,trainingLevel:S.profile.trainingLevel};
+  const final=computeFinalMacros(p,S.profile.overrides);
   S.profile.cals=final.cals;
   S.profile.protein=final.protein;
   S.profile.fat=final.fat;
   S.profile.carbs=final.carbs;
+  S.profile.water=final.water;
   saveLocal();
   updateAll();
 }
@@ -1274,17 +1341,38 @@ function updateDate(){const el=document.getElementById('h-date');if(el)el.textCo
 function showApp(){document.getElementById('setup-overlay').classList.add('hidden');document.getElementById('main-header').classList.remove('hidden');document.getElementById('main-nav').classList.remove('hidden');document.querySelectorAll('.section').forEach(s=>s.classList.remove('hidden'));applyTabSettings();}
 
 // ─── MACRO ENGINE ─────────────────────────────────────────────────────────────
-// Same static formula Josh's tracker always used, with protein scaled by training level.
-// trainingLevel 'recreational' (mult 1.0) reproduces the original goal*2 protein exactly.
+// Ported from the old flat "goal weight × 26" rule of thumb to Mifflin-St Jeor — the same
+// validated BMR equation the generic/Lauren/trial trackers use, and the more evidence-backed
+// of the two approaches (it accounts for sex/age/height/current weight/activity rather than
+// just the number you're aiming for). Calories are the only thing Mifflin-St Jeor itself drives;
+// protein/fat/carbs/water are separate conventions layered on top, same as the other trackers.
+// lose/maintain/build is inferred from how your goal weight compares to your current weight —
+// there's no separate "goal type" setting to touch, so changing Goal in Settings still
+// auto-recalculates everything exactly like it always has.
+function latestWeightKg(){
+  return S.weights.length ? S.weights[S.weights.length-1].weight : (S.profile?S.profile.current:70);
+}
 function computeMacros(p){
-  const goal=p.goal;
-  const mult=(TRAINING_LEVELS[p.trainingLevel]||TRAINING_LEVELS.recreational).mult;
-  const cals=Math.round(goal*26);
-  const protein=Math.round(goal*2*mult);
-  const fat=Math.round(cals/30);
-  const carbs=Math.max(50,Math.round((cals-protein*4-fat*9)/4));
-  const water=Math.round((goal/30)*1000);
-  return {cals,protein,fat,carbs,water};
+  const sex=p.sex==='female'?'female':'male';
+  const age=+p.age||47, height=+p.height||184;
+  const weight=+p.weight||70;
+  const goal=(p.goal!==null && p.goal!==undefined && p.goal!=='')?+p.goal:weight;
+  const activity=p.activity||'active';
+  const diff=goal-weight;
+  const goalType = diff<=-0.5 ? 'lose' : diff>=0.5 ? 'build' : 'maintain';
+  const bmr = 10*weight + 6.25*height - 5*age + (sex==='male'?5:-161);
+  const tdee = bmr * (ACTIVITY_MULT[activity]||1.725);
+  let cals = goalType==='lose' ? tdee*0.8 : goalType==='build' ? tdee*1.1 : tdee;
+  const floor = sex==='male'?1500:1200;
+  cals = Math.max(Math.round(cals),floor);
+  const trainingLevel = TRAINING_LEVELS[p.trainingLevel]?p.trainingLevel:'recreational';
+  const proteinPerKg = TRAINING_LEVELS[trainingLevel].proteinPerKg[goalType];
+  const protein = Math.round(proteinPerKg*weight);
+  const fatPct = sex==='female'?0.30:0.25;
+  const fat = Math.round((cals*fatPct)/9);
+  const carbs = Math.max(50,Math.round((cals-protein*4-fat*9)/4));
+  const water = Math.round((weight/30)*1000);
+  return {cals,protein,fat,carbs,water,bmr:Math.round(bmr),tdee:Math.round(tdee),goalType};
 }
 // Overlays any non-null/non-empty dietitian override fields onto the computed result.
 function computeFinalMacros(p,overrides){
@@ -1296,14 +1384,19 @@ function computeFinalMacros(p,overrides){
   const fat=pick('fat');
   const carbs=pick('carbs');
   const hasOverrides=['cals','protein','fat','carbs'].some(k=>ov[k]!==null && ov[k]!==undefined && ov[k]!=='');
-  return {cals,protein,fat,carbs,water:base.water,hasOverrides};
+  return {cals,protein,fat,carbs,water:base.water,bmr:base.bmr,tdee:base.tdee,goalType:base.goalType,hasOverrides};
 }
 
 // ─── SETUP ────────────────────────────────────────────────────────────────────
+// This overlay is Josh's own pre-loaded onboarding screen (only ever shown on a completely
+// fresh install), so it stays simple — Sex/Age/Height/Activity use his known defaults here
+// rather than adding more fields to a screen he's not meant to see again. Those four are
+// editable afterwards in Settings.
 function calcTargets(){
+  const cur=parseFloat(document.getElementById('s-cur').value)||103.8;
   const goal=parseFloat(document.getElementById('s-goal').value)||92;
   const trainingLevel=document.getElementById('s-training')?document.getElementById('s-training').value:'recreational';
-  const {cals,protein,fat,carbs,water}=computeMacros({goal,trainingLevel});
+  const {cals,protein,fat,carbs,water}=computeMacros({weight:cur,goal,trainingLevel,sex:'male',age:47,height:184,activity:'active'});
   const box=document.getElementById('s-suggestion');box.style.display='block';
   box.innerHTML=`<strong>At ${goal}kg:</strong> ${cals} cal · ${protein}g protein · ${fat}g fat · ${carbs}g carbs · ${(water/1000).toFixed(1)}L water`;
   S._pending={cals,protein,fat,carbs,water,trainingLevel};
@@ -1312,8 +1405,8 @@ function finishSetup(){
   const cur=parseFloat(document.getElementById('s-cur').value)||103.8;
   const goal=parseFloat(document.getElementById('s-goal').value)||92;
   const trainingLevel=document.getElementById('s-training')?document.getElementById('s-training').value:'recreational';
-  if(!S._pending)S._pending={...computeMacros({goal,trainingLevel}),trainingLevel};
-  S.profile={name:'Josh',current:106,goal,height:184,age:47,...S._pending,trainingLevel,overrides:{cals:null,protein:null,fat:null,carbs:null}};
+  if(!S._pending)S._pending={...computeMacros({weight:cur,goal,trainingLevel,sex:'male',age:47,height:184,activity:'active'}),trainingLevel};
+  S.profile={name:'Josh',current:106,goal,height:184,age:47,sex:'male',activity:'active',...S._pending,trainingLevel,overrides:{cals:null,protein:null,fat:null,carbs:null}};
   if(!S.weights.find(w=>w.weight===cur))S.weights.push({id:newId('w'),updatedAt:Date.now(),date:new Date().toDateString(),weight:cur});
   saveLocal();showApp();renderViewDate();
 }
@@ -2458,7 +2551,13 @@ function buildSys(){
   // whatever was typed in at initial setup.
   const baselineWeight=p?.current??106;
   const goalWeight=p?.goal??92;
-  return `You are Josh's personal health assistant. Josh: 47yo male, FIFO tunnelling worker (2wks on/1wk off, rotating days/nights), 184cm, current ~${S.weights.length?S.weights[S.weights.length-1].weight:103.8}kg, baseline ${baselineWeight}kg, goal ${goalWeight}kg.
+  // Sex/Age/Height/Activity are read live from S.profile (added for the Mifflin-St Jeor macro
+  // port) instead of being hardcoded, so a correction made in Settings shows up here too.
+  const sexDesc=p?.sex==='female'?'female':'male';
+  const ageDesc=p?.age??47;
+  const heightDesc=p?.height??184;
+  const activityDesc=ACTIVITY_LABEL[p?.activity]||'active';
+  return `You are Josh's personal health assistant. Josh: ${ageDesc}yo ${sexDesc}, FIFO tunnelling worker (2wks on/1wk off, rotating days/nights), ${heightDesc}cm, ${activityDesc}, current ~${S.weights.length?S.weights[S.weights.length-1].weight:103.8}kg, baseline ${baselineWeight}kg, goal ${goalWeight}kg.
 
 Active peptides: ${peptideLines||'none'}.
 Peptide cautions to keep in mind: ${cautionLines||'none noted'}.
