@@ -489,6 +489,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <!-- MANUAL ENTRY -->
   <div class="card">
     <div class="card-title">✏️ Manual Entry</div>
+    <div class="hidden" id="m-edit-banner" style="font-size:12px;padding:8px 10px;border-radius:8px;margin-bottom:10px;line-height:1.5"></div>
     <div class="form-group">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <div class="input-label" style="margin-bottom:0">Food name</div>
@@ -1467,11 +1468,16 @@ function updateMealsList(){
   const meals=mealsForDate(viewDateStr());
   if(!meals.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No meals logged yet.</div>';return;}
   const fibOn=S.settings&&S.settings.nutrients&&S.settings.nutrients.fib;
-  // Deduction lines (from the Leftovers feature) get a dashed/tinted style so they read as an
-  // adjustment rather than a separate food item, without needing a whole new CSS class.
+  // Deduction lines (from the Leftovers feature) get a dashed amber style so they read as an
+  // adjustment rather than a separate food item. Leftovers logged *separately* (still a normal
+  // addition to the day's totals — see logLeftoversSeparately()) get a lighter blue-tinted dashed
+  // style plus a small "LEFTOVER" tag, so the log visibly distinguishes "I ate this leftover" from
+  // "I ate a brand new meal" — previously both looked identical to any other logged meal.
   el.innerHTML=meals.map(m=>{
     const dedStyle=m.isDeduction?' style="border:1px dashed var(--border);background:var(--amber-pale)"':'';
-    return `<div class="meal-item"${dedStyle}><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs${fibOn?' · '+(m.fib||0)+'g fiber':''}</div></div><span class="meal-del" style="font-size:17px" onclick="editMeal('${m.id}')" title="Edit">✎</span><div class="meal-del" onclick="delMeal('${m.id}')" title="Delete">×</div></div>`;
+    const leftoverStyle=(!m.isDeduction&&m.isLeftover)?' style="border:1px dashed var(--border);background:var(--blue-pale)"':'';
+    const leftoverTag=(!m.isDeduction&&m.isLeftover)?' <span style="font-size:10px;font-weight:700;color:var(--blue);background:#fff;border-radius:5px;padding:1px 5px;margin-left:4px">🥡 LEFTOVER</span>':'';
+    return `<div class="meal-item"${dedStyle||leftoverStyle}><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}${leftoverTag}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs${fibOn?' · '+(m.fib||0)+'g fiber':''}</div></div><span class="meal-del" style="font-size:17px" onclick="editMeal('${m.id}')" title="Edit">✎</span><div class="meal-del" onclick="delMeal('${m.id}')" title="Delete">×</div></div>`;
   }).join('');
 }
 function delMeal(id){if(mealEditId===id)cancelMealEdit();S.meals=S.meals.filter(m=>m.id!==id);markDeleted('meal',id);saveLocal();updateAll();}
@@ -1481,7 +1487,16 @@ function addManual(){
   const vals={name,cal:+document.getElementById('m-cal').value||0,pro:+document.getElementById('m-pro').value||0,fat:+document.getElementById('m-fat').value||0,carb:+document.getElementById('m-carb').value||0,fib:+document.getElementById('m-fib').value||0};
   if(mealEditId){
     const idx=S.meals.findIndex(m=>m.id===mealEditId);
-    if(idx>-1){S.meals[idx]={...S.meals[idx],...vals,updatedAt:Date.now()};} // date/id/time untouched — editing doesn't move the entry to a different day
+    if(idx>-1){
+      const existing=S.meals[idx];
+      // Deduction entries (Leftovers → "Deduct from last meal") are edited as positive "amount
+      // removed" values — see editMeal() — so flip the sign back to negative on save. Without
+      // this, saving an edited deduction would silently turn it into an addition instead of a
+      // subtraction, which is exactly the mix-up Josh ran into.
+      const sign=existing.isDeduction?-1:1;
+      const saved={...vals,cal:vals.cal*sign,pro:vals.pro*sign,fat:vals.fat*sign,carb:vals.carb*sign,fib:vals.fib*sign};
+      S.meals[idx]={...existing,...saved,updatedAt:Date.now()}; // date/id/time/isDeduction/isLeftover untouched — editing doesn't move the entry to a different day or change what kind of entry it is
+    }
     saveLocal();updateAll();
     cancelMealEdit();
   } else {
@@ -1493,11 +1508,28 @@ function editMeal(id){
   const m=S.meals.find(x=>x.id===id);if(!m)return;
   mealEditId=id;
   document.getElementById('m-food').value=m.name;
-  document.getElementById('m-cal').value=m.cal;
-  document.getElementById('m-pro').value=m.pro;
-  document.getElementById('m-fat').value=m.fat;
-  document.getElementById('m-carb').value=m.carb;
-  document.getElementById('m-fib').value=m.fib||0;
+  // Deduction entries are stored as NEGATIVE numbers (they subtract from the day). Show the
+  // positive amount being removed instead of e.g. "-150" — editing then re-flips the sign on
+  // save (see addManual()) — so the field can't be mistaken for a plain calorie count and
+  // accidentally typed over as positive, which would turn the deduction into an addition.
+  const sign=m.isDeduction?-1:1;
+  document.getElementById('m-cal').value=m.cal*sign;
+  document.getElementById('m-pro').value=m.pro*sign;
+  document.getElementById('m-fat').value=m.fat*sign;
+  document.getElementById('m-carb').value=m.carb*sign;
+  document.getElementById('m-fib').value=(m.fib||0)*sign;
+  const banner=document.getElementById('m-edit-banner');
+  if(m.isDeduction){
+    banner.style.background='var(--amber-pale)';banner.style.borderLeft='3px solid var(--amber)';banner.style.color='var(--dark)';
+    banner.textContent="➖ Editing a Leftovers deduction. The numbers below are the amount being removed from today's totals — enter them as positive, they'll stay subtracted when you save.";
+    banner.classList.remove('hidden');
+  } else if(m.isLeftover){
+    banner.style.background='var(--blue-pale)';banner.style.borderLeft='3px solid var(--blue)';banner.style.color='var(--dark)';
+    banner.textContent='🥡 Editing a Leftovers entry logged separately — it still adds to today\'s totals like any other meal.';
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
   document.getElementById('m-save-btn').textContent='Update meal';
   document.getElementById('m-cancel-btn').classList.remove('hidden');
   showTab('log',document.querySelector('.nav-tab[onclick*="\'log\'"]'));
@@ -1507,6 +1539,7 @@ function cancelMealEdit(){
   mealEditId=null;
   document.getElementById('m-save-btn').textContent='Add to today';
   document.getElementById('m-cancel-btn').classList.add('hidden');
+  const banner=document.getElementById('m-edit-banner');if(banner)banner.classList.add('hidden');
   ['m-food','m-cal','m-pro','m-fat','m-carb','m-fib'].forEach(id=>document.getElementById(id).value='');
 }
 function quickAddCardHtml(f){
@@ -1811,7 +1844,10 @@ function lastLoggableMealForDate(dateStr){
   return meals.reduce((a,b)=>(b.updatedAt||0)>(a.updatedAt||0)?b:a);
 }
 function logLeftoversSeparately(){
-  addMeal(getPhotoFieldsAsMeal());
+  // Flagged isLeftover so the meal log can visibly distinguish this from a brand-new meal (see
+  // updateMealsList()) and so editMeal() can show the right context banner — it still ADDS to
+  // today's totals like any other meal; "separately" means "its own log line", not "subtracted".
+  addMeal({...getPhotoFieldsAsMeal(),isLeftover:true});
   document.getElementById('ph-preview').classList.add('hidden');
 }
 function deductLeftoversFromLastMeal(){
