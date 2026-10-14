@@ -386,6 +386,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     </div>
   </div>
   <div class="card">
+    <div class="card-title">📝 Notes <span id="day-note-status" style="float:right;font-weight:700;color:var(--green)"></span></div>
+    <div class="settings-hint" style="margin-top:-4px">Anything worth remembering about this day — felt off, travelling, started/stopped something, measurements taken under unusual conditions, etc. Visible to the Ask assistant.</div>
+    <textarea class="input-field" id="day-note-text" rows="3" placeholder="e.g. Tummy bug the last 2 days — eating dry/bland (crackers, vegemite). Movement and targets will be off." style="resize:vertical;font-family:inherit"></textarea>
+    <button class="btn btn-secondary btn-sm" style="width:auto;margin-top:8px" onclick="saveDayNote()">Save note</button>
+  </div>
+  <div class="card">
     <div class="card-title">Status <span id="streak-count" style="float:right;font-weight:700;color:var(--amber)">🔥 0 days</span></div>
     <div class="sm" id="traffic-light" style="text-align:left;padding:12px">Log a meal to see today's status.</div>
   </div>
@@ -759,7 +765,8 @@ let S = {
   settings: null,
   quickFoods: null,
   fasting: null,
-  measurements: null
+  measurements: null,
+  dayNotes: null
 };
 let chatHistory = [];
 let lookupPending = null;
@@ -810,6 +817,21 @@ function dedupeWeightsByDate(){
   });
   if(byDate.size < (S.weights||[]).length){
     S.weights = [...byDate.values()].sort((a,b)=>weightDateMs(a.date)-weightDateMs(b.date));
+    return true;
+  }
+  return false;
+}
+// Collapse duplicate day-note entries for the same date — mirrors dedupeWeightsByDate() exactly,
+// same reasoning: a merge keyed only by id is blind to date, so a dedupe pass is needed any time
+// S.dayNotes changes, not just at startup. Keeps whichever duplicate has the newest updatedAt.
+function dedupeDayNotesByDate(){
+  const byDate=new Map();
+  (S.dayNotes||[]).forEach(n=>{
+    const cur=byDate.get(n.date);
+    if(!cur || (n.updatedAt||0) > (cur.updatedAt||0)) byDate.set(n.date, n);
+  });
+  if(byDate.size < (S.dayNotes||[]).length){
+    S.dayNotes = [...byDate.values()];
     return true;
   }
   return false;
@@ -941,6 +963,11 @@ function migrateState(){
   // Body measurements — dated log, one entry per day, same pattern as weight/sleep/movement
   if(!S.measurements)S.measurements=[];
   migrateArr(S.measurements,'ms','date');
+
+  // Daily Notes — dated log, one entry per day, same pattern as weight/sleep/measurements
+  if(!S.dayNotes)S.dayNotes=[];
+  migrateArr(S.dayNotes,'note','date');
+  dedupeDayNotesByDate();
 
   // Training level + dietitian override backfill — guarded on S.profile existing (it's null pre-setup).
   // 'recreational' (mult 1.0) reproduces the old static goal*2 protein formula exactly, so this is a
@@ -1422,6 +1449,7 @@ function movementForDate(dateStr){return S.movement.find(m=>m.date===dateStr)||n
 function sleepForDate(dateStr){return S.sleep.find(s=>s.date===dateStr)||null;}
 function weightForDate(dateStr){return S.weights.find(w=>w.date===dateStr)||null;}
 function measurementsForDate(dateStr){return (S.measurements||[]).find(m=>m.date===dateStr)||null;}
+function dayNoteForDate(dateStr){return (S.dayNotes||[]).find(n=>n.date===dateStr)||null;}
 function totalsForDate(dateStr){return mealsForDate(dateStr).reduce((a,m)=>({cal:a.cal+(+m.cal||0),pro:a.pro+(+m.pro||0),fat:a.fat+(+m.fat||0),carb:a.carb+(+m.carb||0),fib:a.fib+(+m.fib||0)}),{cal:0,pro:0,fat:0,carb:0,fib:0});}
 function waterTotalForDate(dateStr){return waterForDate(dateStr).reduce((a,w)=>a+(w.ml||0),0);}
 
@@ -1936,6 +1964,43 @@ function loadWeightIntoForm(){
   if(el)el.value=existing?existing.weight:'';
 }
 
+// ─── DAY NOTES ────────────────────────────────────────────────────────────────
+// Free-text note per calendar day — same dated-log shape as weight/sleep/measurements, surfaced
+// to the Ask assistant (see buildDataSummary()) so context like "tummy bug" or "travelling" is
+// visible without Josh having to repeat it in chat every time.
+function saveDayNote(){
+  const el=document.getElementById('day-note-text');
+  if(!el)return;
+  const text=el.value.trim();
+  const dateStr=viewDateStr();
+  const existing=dayNoteForDate(dateStr);
+  if(existing && !text){
+    S.dayNotes=(S.dayNotes||[]).filter(n=>n.id!==existing.id);
+    markDeleted('note',existing.id);
+  } else if(existing && text){
+    existing.text=text;
+    existing.updatedAt=Date.now();
+  } else if(!existing && text){
+    if(!S.dayNotes)S.dayNotes=[];
+    S.dayNotes.push({id:newId('note'),date:dateStr,updatedAt:Date.now(),text});
+  } // !existing && !text -> nothing to do
+  saveLocal();
+  const statusEl=document.getElementById('day-note-status');
+  if(statusEl){
+    statusEl.textContent='Saved ✓';
+    setTimeout(()=>{ if(statusEl.textContent==='Saved ✓') statusEl.textContent=''; },1500);
+  }
+}
+// Paging to a past day (or reloading on today) shows whatever note is already logged for that
+// date, same pattern as loadWeightIntoForm/loadMeasurementsIntoForm. Deliberately called from
+// renderViewDate() rather than updateAll() — updateAll() also runs on every background Drive
+// re-sync, and re-populating this field then would blow away whatever's mid-typing.
+function loadDayNoteIntoForm(){
+  const existing=dayNoteForDate(viewDateStr());
+  const el=document.getElementById('day-note-text');
+  if(el) el.value = existing ? existing.text : '';
+}
+
 // ─── MEASUREMENTS ─────────────────────────────────────────────────────────────
 // Builds the dynamic form once from MEASURE_FIELDS — inline ⓘ tip per field, plus the
 // collapsible general-tips card wired up in the HTML already.
@@ -2379,6 +2444,7 @@ function renderViewDate(){
   updateAll();
   loadMeasurementsIntoForm(); // only on an actual day change/initial load — see note in updateAll()
   loadWeightIntoForm(); // same reasoning — see note above delWeight()
+  loadDayNoteIntoForm(); // same reasoning — see note above saveDayNote()
   updateOtherLogs();
 }
 // Sleep/weight/movement/measurements summary for the viewed day — only shown when paging back, since those already have their own live tabs for today
@@ -2387,14 +2453,15 @@ function updateOtherLogs(){
   if(!card)return;
   if(isViewingToday()){ card.classList.add('hidden'); return; }
   const dateStr=viewDateStr();
-  const mv=movementForDate(dateStr),sl=sleepForDate(dateStr),wt=weightForDate(dateStr),ms=measurementsForDate(dateStr);
-  if(!mv&&!sl&&!wt&&!ms){ card.classList.add('hidden'); return; }
+  const mv=movementForDate(dateStr),sl=sleepForDate(dateStr),wt=weightForDate(dateStr),ms=measurementsForDate(dateStr),dn=dayNoteForDate(dateStr);
+  if(!mv&&!sl&&!wt&&!ms&&!dn){ card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
   let html='';
   if(mv)html+=`<div class="history-row"><span>🏃 Movement</span><span style="font-weight:700">${mv.steps.toLocaleString()} steps · ${mv.calBurned.toLocaleString()} cal burned</span></div>`;
   if(sl)html+=`<div class="history-row"><span>😴 Sleep</span><span style="font-weight:700">${fmtHM(sl.total)} total · ${fmtMins(sl.deep)} deep · ${fmtMins(sl.rem)} REM</span></div>`;
   if(wt)html+=`<div class="history-row"><span>⚖️ Weight</span><span style="font-weight:700">${wt.weight}kg</span></div>`;
   if(ms)html+=`<div class="history-row"><span>📏 Measurements</span><span style="font-weight:700;text-align:right;max-width:65%">${fmtMeasureEntry(ms)||'Logged'}</span></div>`;
+  if(dn && dn.text)html+=`<div class="history-row"><span>📝 Notes</span><span style="font-weight:700;text-align:right;max-width:65%">${dn.text}</span></div>`;
   document.getElementById('other-logs-body').innerHTML=html;
 }
 
@@ -2580,6 +2647,10 @@ function buildSys(){
     return `${pep.name} (${pep.dosing.doseLabel})`;
   }).join('; ');
   const cautionLines=(S.peptides||[]).flatMap(pep=>(pep.cautions||[]).map(c=>pep.name+': '+c)).join(' | ');
+  // Individual injection-log notes (entered via "Log this injection") weren't surfaced to the Ask
+  // assistant before this — it could see the current dose/week but not things like "mild head
+  // sensation" or "no nausea" that Josh actually typed in. Last 5 entries that have a note, newest first.
+  const peptideLogNoteLines=[...(S.peptideLogs||[])].filter(l=>l.notes).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,5).map(l=>`${l.date} ${peptideNameById?peptideNameById(l.peptideId):l.peptideId}: ${l.notes}`).join('; ');
   const suppLines=(S.supplements||[]).map(s=>`${s.name} (${s.dose})`).join(', ');
   const fastingLine=S.fasting&&S.fasting.windowEnabled?`Daily eating window: ${S.fasting.windowHours}h starting ${S.fasting.windowStart}.`:'';
   // Baseline/goal are read live from S.profile rather than hardcoded, so a correction made in
@@ -2597,6 +2668,7 @@ function buildSys(){
 
 Active peptides: ${peptideLines||'none'}.
 Peptide cautions to keep in mind: ${cautionLines||'none noted'}.
+Recent peptide injection notes: ${peptideLogNoteLines||'none'}.
 Supplements: ${suppLines||'none'}.
 ${fastingLine}
 
@@ -2616,10 +2688,10 @@ function buildDataSummary(){
   for(let i=0;i<7;i++){
     const d=new Date();d.setDate(d.getDate()-i);
     const ds=d.toDateString();
-    const t=totalsForDate(ds),w=waterTotalForDate(ds),mv=movementForDate(ds),sl=sleepForDate(ds),wt=weightForDate(ds);
-    const hasAny=t.cal||w||mv||sl||wt;
+    const t=totalsForDate(ds),w=waterTotalForDate(ds),mv=movementForDate(ds),sl=sleepForDate(ds),wt=weightForDate(ds),dn=dayNoteForDate(ds);
+    const hasAny=t.cal||w||mv||sl||wt||dn;
     if(!hasAny&&i>0)continue; // skip empty older days to keep this compact, but always show today even if empty
-    days.push(`${i===0?'Today':ds}: ${Math.round(t.cal)} cal, ${Math.round(t.pro)}g pro, ${Math.round(t.fat)}g fat, ${Math.round(t.carb)}g carb, ${w}ml water${mv?`, ${mv.steps} steps/${mv.calBurned} cal burned`:''}${sl?`, sleep ${sl.total}h (${sl.deep}m deep/${sl.rem}m REM)`:''}${wt?`, weighed ${wt.weight}kg`:''}`);
+    days.push(`${i===0?'Today':ds}: ${Math.round(t.cal)} cal, ${Math.round(t.pro)}g pro, ${Math.round(t.fat)}g fat, ${Math.round(t.carb)}g carb, ${w}ml water${mv?`, ${mv.steps} steps/${mv.calBurned} cal burned`:''}${sl?`, sleep ${sl.total}h (${sl.deep}m deep/${sl.rem}m REM)${sl.notes?' — '+sl.notes:''}`:''}${wt?`, weighed ${wt.weight}kg`:''}${dn&&dn.text?` — Note: ${dn.text}`:''}`);
   }
   const weightLines=[...S.weights].slice(-5).map(w=>`${w.date}: ${w.weight}kg`).join('; ');
   // Measurements weren't surfaced to the Ask assistant at all before this — it could see weight
@@ -3044,6 +3116,8 @@ async function loadFromDrive(){
         S.quickFoods = mergeById(S.quickFoods, driveData.quickFoods, 'quickfood');
         dedupeQuickFoodsByName(); // clean up any same-name duplicates the Drive merge just re-introduced
         S.measurements = mergeById(S.measurements, driveData.measurements, 'measurement').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
+        S.dayNotes = mergeById(S.dayNotes, driveData.dayNotes, 'note').sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0));
+        dedupeDayNotesByDate();
         if(driveData.fasting){
           if(!S.fasting)S.fasting={windowEnabled:false,windowHours:6,windowStart:'12:00',current:null,log:[]};
           S.fasting.log = mergeById(S.fasting.log, driveData.fasting.log, 'fast');
@@ -3113,6 +3187,7 @@ async function syncToDrive(){
       quickFoods: S.quickFoods,
       fasting: S.fasting,
       measurements: S.measurements,
+      dayNotes: S.dayNotes,
       lastSync: new Date().toISOString()
     });
     const resp = await driveApiFetch(
