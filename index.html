@@ -1640,7 +1640,7 @@ async function handleManualPhoto(event){
         method:'POST',
         headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},
         body:JSON.stringify({
-          model:'claude-sonnet-4-6',max_tokens:400,
+          model:'claude-sonnet-4-6',max_tokens:700,
           messages:[{role:'user',content:[
             {type:'image',source:{type:'base64',media_type:file.type,data:b64}},
             {type:'text',text:'Analyse this meal photo for a 47yo male, 184cm, ~104kg, 184g daily protein target. Cooked weight assumed. Return ONLY valid JSON: {"name":"meal description","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one emoji","note":"confidence note or key assumption"}'}
@@ -1685,7 +1685,7 @@ async function doLookup(){
       method:'POST',
       headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-6',max_tokens:300,
+        model:'claude-sonnet-4-6',max_tokens:700,
         messages:[{role:'user',content:`Estimate macros for: "${q}". This is for a 47yo male FIFO worker, 184cm, ~104kg. Cooked weight assumed unless stated otherwise. Return ONLY valid JSON, no other text: {"name":"descriptive food name with quantity","cal":number,"pro":number,"fat":number,"carb":number,"fib":number,"emoji":"one relevant emoji","note":"one brief sentence — confidence level or key assumption e.g. cooked weight assumed"}`}]
       })
     });
@@ -1700,8 +1700,12 @@ async function doLookup(){
     document.getElementById('lr-note').textContent=meal.note;
     result.style.display='block';
   }catch(e){
+    console.error('doLookup failed:',e);
     loading.classList.add('hidden');
-    document.getElementById('lookup-input').placeholder='Could not look up — try rephrasing or use manual entry';
+    document.getElementById('lr-name').textContent='⚠️ Could not look up';
+    document.getElementById('lr-macros').innerHTML='';
+    document.getElementById('lr-note').textContent="Didn't come back cleanly — try again, shorten the description, or use Manual Entry.";
+    result.style.display='block';
   }
   btn.disabled=false;
 }
@@ -1744,7 +1748,7 @@ async function analysePhotoAndRender(promptText,loading,result){
       method:'POST',
       headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-6',max_tokens:400,
+        model:'claude-sonnet-4-6',max_tokens:700,
         messages:[{role:'user',content:[
           {type:'image',source:{type:'base64',media_type:lastPhotoType,data:lastPhotoB64}},
           {type:'text',text:promptText}
@@ -2566,7 +2570,7 @@ function retryPeptideLookup(id){
 }
 async function fetchPeptideInfo(name,dose){
   try{
-    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:350,messages:[{role:'user',content:`Give a brief practical profile for the peptide/compound "${name}" (dose/timing as described: "${dose}"). Return ONLY valid JSON, no other text:
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:600,messages:[{role:'user',content:`Give a brief practical profile for the peptide/compound "${name}" (dose/timing as described: "${dose}"). Return ONLY valid JSON, no other text:
 {"purpose":"one sentence — what it's used for","cautions":["short caution 1","short caution 2"],"evidence":"one short clause, or empty string"}
 
 Rules:
@@ -2774,7 +2778,7 @@ async function sendChat(imgB64,imgType){
   const currentUserMsg={role:'user',content:content.length===1&&content[0].type==='text'?text:content};
   try{
     const msgs=[{role:'user',content:'System: '+buildSys()},{role:'assistant',content:'Ready to help.'},...chatHistory,currentUserMsg];
-    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:msgs})});
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1200,messages:msgs})});
     const data=await resp.json();
     let reply=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     // Parse and execute any action blocks, then strip them from what's actually shown
@@ -2861,7 +2865,7 @@ function toggleSupp(id){S.supps[id]=!S.supps[id];saveLocal();renderSupps();}
 
 async function fetchSupplementNote(name,dose){
   try{
-    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:200,messages:[{role:'user',content:`In one short sentence (under 25 words), explain what the supplement "${name}" (taken: "${dose}") is generally used for and why that timing makes sense. Return ONLY the sentence — no preamble, no quotes.`}]})});
+    const resp=await fetch('https://josh-tracker-proxy.joe-shwa-smith.workers.dev',{method:'POST',headers:{'Content-Type':'application/json','X-App-Key':'IhDgBIUxaM86f12tBXwNIhvufgCmW5qF'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:350,messages:[{role:'user',content:`In one short sentence (under 25 words), explain what the supplement "${name}" (taken: "${dose}") is generally used for and why that timing makes sense. Return ONLY the sentence — no preamble, no quotes.`}]})});
     const data=await resp.json();
     return data.content.filter(c=>c.type==='text').map(c=>c.text).join('').trim();
   }catch(e){return '';}
