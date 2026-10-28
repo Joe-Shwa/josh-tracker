@@ -1488,7 +1488,7 @@ function addWater(ml){
   S.water.push({id:newId('water'),ml,date:viewDateStr(),updatedAt:Date.now()});
   saveLocal();updateWater();
 }
-function delWater(id){S.water=S.water.filter(w=>w.id!==id);markDeleted('water',id);saveLocal();updateWater();}
+function delWater(id){if(!confirm('Delete this water entry?'))return;S.water=S.water.filter(w=>w.id!==id);markDeleted('water',id);saveLocal();updateWater();}
 
 let mealEditId=null;
 function updateMealsList(){
@@ -1508,7 +1508,7 @@ function updateMealsList(){
     return `<div class="meal-item"${dedStyle||leftoverStyle}><div class="meal-emoji">${m.emoji||'🍽️'}</div><div class="meal-info"><div class="meal-name">${m.name}${leftoverTag}</div><div class="meal-macros">${m.cal} cal · ${m.pro}g protein · ${m.fat}g fat · ${m.carb}g carbs${fibOn?' · '+(m.fib||0)+'g fiber':''}</div></div><span class="meal-del" style="font-size:17px" onclick="editMeal('${m.id}')" title="Edit">✎</span><div class="meal-del" onclick="delMeal('${m.id}')" title="Delete">×</div></div>`;
   }).join('');
 }
-function delMeal(id){if(mealEditId===id)cancelMealEdit();S.meals=S.meals.filter(m=>m.id!==id);markDeleted('meal',id);saveLocal();updateAll();}
+function delMeal(id){if(!confirm('Delete this meal entry?'))return;if(mealEditId===id)cancelMealEdit();S.meals=S.meals.filter(m=>m.id!==id);markDeleted('meal',id);saveLocal();updateAll();}
 function addMeal(m){S.meals.push({...m,cal:+m.cal||0,pro:+m.pro||0,fat:+m.fat||0,carb:+m.carb||0,fib:+m.fib||0,id:newId('meal'),date:viewDateStr(),updatedAt:Date.now(),time:new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})});saveLocal();updateAll();}
 function addManual(){
   const name=document.getElementById('m-food').value;if(!name)return;
@@ -1668,6 +1668,7 @@ async function handleManualPhoto(event){
   reader.readAsDataURL(file);event.target.value='';
 }
 function removeQuickFood(id){
+  if(!confirm('Remove this from Quick Add?'))return;
   S.quickFoods=(S.quickFoods||[]).filter(f=>f.id!==id);
   markDeleted('quickfood',id);
   saveLocal();renderQuickAdd();
@@ -1951,6 +1952,7 @@ function updateWeight(){
   }).join('')||'No entries yet.';
 }
 function delWeight(id){
+  if(!confirm('Delete this weight entry?'))return;
   S.weights=S.weights.filter(w=>w.id!==id);
   markDeleted('w',id);
   saveLocal();
@@ -2115,6 +2117,7 @@ function renderMeasurementsHistory(){
   }).join('');
 }
 function deleteMeasurementEntry(id){
+  if(!confirm('Delete this measurement entry?'))return;
   S.measurements=(S.measurements||[]).filter(m=>m.id!==id);
   markDeleted('measurement',id);
   expandedMeasurements.delete(id);
@@ -2173,6 +2176,7 @@ function cancelSleepEdit(){
   ['sl-tot-h','sl-tot-m','sl-deep-h','sl-deep-m','sl-rem-h','sl-rem-m','sl-notes'].forEach(id=>document.getElementById(id).value='');
 }
 function delSleep(id){
+  if(!confirm('Delete this sleep entry?'))return;
   if(sleepEditId===id)cancelSleepEdit();
   S.sleep=S.sleep.filter(s=>s.id!==id);
   markDeleted('sleep',id);
@@ -2219,7 +2223,7 @@ function logMovement(){
   saveLocal();updateMovement();updateTrafficLight();
   document.getElementById('mv-steps').value='';document.getElementById('mv-cal').value='';
 }
-function delMovement(id){S.movement=S.movement.filter(m=>m.id!==id);markDeleted('movement',id);saveLocal();updateMovement();updateTrafficLight();}
+function delMovement(id){if(!confirm('Delete this movement entry?'))return;S.movement=S.movement.filter(m=>m.id!==id);markDeleted('movement',id);saveLocal();updateMovement();updateTrafficLight();}
 function updateMovement(){
   const titleEl=document.getElementById('mv-title');
   if(titleEl)titleEl.textContent=isViewingToday()?'Log Today\'s Movement':'Log Movement — '+viewingDate.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'});
@@ -2483,8 +2487,10 @@ function logPeptideDose(id){
   S.peptideLogs.push({id:newId('pep_log'),peptideId:id,updatedAt:Date.now(),date,units:+units,mg:+mg,notes});
   saveLocal();renderPeptides();
 }
-function delPeptideLog(id){S.peptideLogs=S.peptideLogs.filter(l=>l.id!==id);markDeleted('pep_log',id);saveLocal();renderPeptides();}
+function delPeptideLog(id){if(!confirm('Delete this dose log entry?'))return;S.peptideLogs=S.peptideLogs.filter(l=>l.id!==id);markDeleted('pep_log',id);saveLocal();renderPeptides();}
 function removePeptide(id){
+  const pName=(S.peptides.find(x=>x.id===id)||{}).name||'this peptide';
+  if(!confirm('Delete '+pName+' and all its dose history? This can\'t be undone.'))return;
   if(peptideEditId===id)cancelPeptideEdit();
   S.peptides=S.peptides.filter(p=>p.id!==id);
   S.peptideLogs=S.peptideLogs.filter(l=>l.peptideId!==id);
@@ -2888,6 +2894,7 @@ async function addCustomSupp(){
 }
 
 function removeSupp(id){
+  if(!confirm('Remove this supplement?'))return;
   S.supplements=(S.supplements||[]).filter(s=>s.id!==id);
   delete S.supps[id];
   markDeleted('supplement',id);
