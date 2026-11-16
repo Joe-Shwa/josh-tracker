@@ -730,6 +730,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <!-- ASK -->
 <div class="section hidden" id="tab-ask">
   <div class="chat-wrap">
+    <div style="display:flex;justify-content:flex-end;padding:6px 10px 0">
+      <span style="font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline" onclick="clearChat()" title="Start a fresh conversation — your logged data isn't affected">🗑️ Clear chat</span>
+    </div>
     <div class="chat-msgs" id="chat-msgs">
       <div class="msg msg-ai"><div class="msg-bubble">Hey Josh 👋 What do you need? Macros, Reta questions, supplement stack, or anything else — go for it.</div><div class="msg-time">Now</div></div>
     </div>
@@ -2686,6 +2689,8 @@ Health: Low free testosterone (231-239 pmol/L below range), elevated FSH (22-23 
 
 ${buildDataSummary()}
 
+The data block above is rebuilt fresh from Josh's live tracker data on every single message you receive — it is always current as of right now. If anything you said earlier in this conversation (including a claim that you lack access to his data, or a specific number like a weight or measurement you recalled from memory) conflicts with what's in this block, this block is correct and your earlier statement was wrong — silently use the current data rather than repeating or defending what you said before.
+
 Be direct, practical, plain English. Protein target is #1 priority while on appetite-suppressing peptides. Cooked weight is default assumption for meat.
 
 ${ACTION_PROTOCOL}`;
@@ -2821,6 +2826,23 @@ function renderChatHistory(){
     const text=typeof msg.content==='string'?msg.content:'[Photo attached]';
     appendMsg(msg.role==='user'?'user':'ai',text);
   });
+}
+// Diagnosed 2026-10-29: the Ask chat's chatHistory was one single, never-reset, ever-growing
+// conversation — every sendChat() call rebuilds the system data fresh but also resends the ENTIRE
+// prior conversation ahead of it, so once the AI stated something wrong early on (e.g. "I don't have
+// access to your measurements", or recalled an old weigh-in instead of checking the live data) it
+// tended to keep echoing that same claim/number on later turns instead of re-reading the fresh data
+// each time. This button gives a one-tap reset instead of needing DevTools. Only the conversation
+// thread is cleared — no tracked data (weights, meals, measurements, peptide logs, etc.) is touched.
+// Note: deliberately does NOT call renderChatHistory() to redraw — that function early-returns when
+// S.chatHistory is empty (see above), so it would leave the old bubbles on screen after a clear.
+function clearChat(){
+  if(!confirm("Clear this chat conversation? This only resets the Ask thread — your logged data (meals, weights, measurements, peptide logs, etc.) isn't affected."))return;
+  S.chatHistory=[];
+  chatHistory=[];
+  saveLocal();
+  const msgsEl=document.getElementById('chat-msgs');
+  if(msgsEl){ while(msgsEl.children.length>1)msgsEl.removeChild(msgsEl.lastChild); }
 }
 
 // Each piece runs independently now — if one throws on bad data, the rest of the tab still renders
